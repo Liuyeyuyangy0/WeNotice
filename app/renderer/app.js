@@ -160,6 +160,96 @@ async function init() {
   window.we.onEvent(handleEvent);
   renderAll();
   maybeShowTrayHint();
+  maybeShowOnboarding();
+}
+
+/** 首次使用向导：演示 → 连接 AstrWeChat → 测试连接（可从设置里再次打开）。 */
+function maybeShowOnboarding() {
+  const appCfg = (state.config && state.config.app) || {};
+  if (appCfg.onboarded) return;
+  if (state.demo) return;
+  setTimeout(() => openOnboardingModal(), 700);
+}
+
+function openOnboardingModal() {
+  openModal({
+    title: '欢迎使用 WeNotice',
+    subtitle: '首次使用向导 · 三步开始',
+    body: `
+      <div class="onboarding">
+        <p class="onboarding-lead">WeNotice 读取 <b>AstrWeChat</b> 的本地 API，把微信里收到的公告、验证码、快递、日程、转账等消息筛出来并弹提醒。三步就能用起来：</p>
+        <ol class="onboarding-steps">
+          <li><b>体验演示</b>：先看看通知中心长什么样（只读演示样例，不碰真实数据）。</li>
+          <li><b>连接 AstrWeChat</b>：退出微信登录 → AstrWeChat「微信连接」里点「自动检测 / 自动获取」→ 重新登录微信 → 点「连接数据库」。</li>
+          <li><b>开启 API</b>：AstrWeChat「设置」里打开「API 服务」和「主动推送」；Token 不用复制，WeNotice 设置里点「自动读取」即可。</li>
+        </ol>
+        <div class="onboarding-note">不确定卡在哪一步？点「测试连接」会告诉你是哪一环没完成；也可以 设置 → 应用 → 导出诊断信息 再发给我们。</div>
+        <div class="test-result" id="onboardingResult" hidden></div>
+      </div>
+    `,
+    footer: `
+      <button class="btn btn-ghost" id="onboardDemo">${icon('sparkles')}先看看演示</button>
+      <button class="btn btn-ghost" id="onboardDownload">${icon('external')}下载 AstrWeChat</button>
+      <button class="btn btn-ghost" id="onboardLater">稍后</button>
+      <button class="btn btn-primary" id="onboardTest">${icon('check')}测试连接</button>
+    `
+  });
+
+  $('#onboardDemo').addEventListener('click', async () => {
+    await window.we.toggleDemo(true);
+    closeModal();
+    toast('已进入演示模式，点右上角「退出演示」可退出', 'ok', 3600);
+  });
+
+  $('#onboardDownload').addEventListener('click', async () => {
+    await window.we.openExternal('https://github.com/CMKH1337/Astrwechat/releases/latest');
+    toast('已打开浏览器；装好后回到 WeNotice 点「测试连接」', 'info', 4200);
+  });
+
+  $('#onboardLater').addEventListener('click', async () => {
+    try {
+      await window.we.saveConfig({ app: { onboarded: true } });
+      state.config.app.onboarded = true;
+    } catch (_err) {
+      /* 忽略 */
+    }
+    closeModal();
+    toast('已关闭引导，可从 设置 → 应用 → 新手引导 再次打开', 'info', 3600);
+  });
+
+  $('#onboardTest').addEventListener('click', async () => {
+    const box = $('#onboardingResult');
+    box.hidden = false;
+    box.className = 'test-result';
+    box.textContent = '正在测试连接…';
+    try {
+      const result = await window.we.testSource();
+      const success = result && result.ok && result.wxReady !== false;
+      box.className = `test-result ${success ? 'is-ok' : 'is-err'}`;
+      const lines = [];
+      lines.push(`地址：${result.baseUrl || '-'}`);
+      lines.push(`健康检查：${result.health ? '通过' : '失败'}`);
+      if (result.tokenValid != null) lines.push(`Access Token：${result.tokenValid ? '有效' : '无效'}`);
+      if (result.wxReady != null) lines.push(`微信连接：${result.wxReady ? '正常' : '未完成（需在 AstrWeChat 里连接微信数据库）'}`);
+      if (result.sessionCount != null) lines.push(`会话数：${result.sessionCount}`);
+      lines.push('');
+      lines.push(success ? '连接成功，开始监听微信消息了。' : result.hint || result.error || '还有步骤没完成，按上面的提示处理后再试。');
+      box.textContent = lines.join('\n');
+      if (success) {
+        try {
+          await window.we.saveConfig({ app: { onboarded: true } });
+          state.config.app.onboarded = true;
+        } catch (_err) {
+          /* 忽略 */
+        }
+        toast('连接成功，微信消息会自动筛选并提醒', 'ok', 3600);
+        setTimeout(() => closeModal(), 1200);
+      }
+    } catch (err) {
+      box.className = 'test-result is-err';
+      box.textContent = `测试失败：${err.message}`;
+    }
+  });
 }
 
 /** 首次启动提示托盘图标位置（Windows 11 默认收进「^」展开区，容易被当成窗口丢了）。 */
@@ -1003,8 +1093,15 @@ function settingsBody() {
     </div>
     <div class="field">
       <label>Access Token</label>
-      <input class="input" id="setToken" type="password" value="${escapeHtml(source.token || '')}" placeholder="从 AstrWeChat 设置中复制">
-      <div class="hint">Token 用于访问本地 API，仅保存在本机配置文件中。保存后会自动尝试连接。</div>
+      <div style="display:flex;gap:8px">
+        <input class="input" id="setToken" type="password" value="${escapeHtml(source.token || '')}" placeholder="从 AstrWeChat 设置中复制" style="flex:1">
+        <button class="btn btn-sm" id="setReadToken" type="button">自动读取</button>
+      </div>
+      <div class="hint">Token 用于访问本地 API，仅保存在本机配置文件中。点「自动读取」可直接从 AstrWeChat 的配置文件取，不用手动复制。</div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-text"><div class="setting-title">自动读取 Token</div><div class="setting-desc">每次连接前自动从 AstrWeChat 配置读取 Token（AstrWeChat 重启后 Token 变化也能自动跟上）</div></div>
+      <button class="switch${on(source.autoTokenSync !== false)}" data-switch="autoTokenSync" type="button" aria-checked="${source.autoTokenSync !== false}"></button>
     </div>
     <div class="setting-row">
       <div class="setting-text"><div class="setting-title">启动时自动连接</div><div class="setting-desc">打开应用后自动连接本地 API 并开始监听</div></div>
@@ -1111,8 +1208,10 @@ function settingsBody() {
       <div class="setting-text"><div class="setting-title">历史记录上限</div><div class="setting-desc">最多保留多少条消息（告警：过多会占用更多内存）</div></div>
       <input class="input" id="setHistoryLimit" type="number" min="200" max="20000" value="${Number(appCfg.historyLimit || 2000)}">
     </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn btn-sm" id="setOpenData">打开数据目录</button>
+      <button class="btn btn-sm" id="setOnboarding">新手引导</button>
+      <button class="btn btn-sm" id="setExportDiag">导出诊断信息</button>
       <button class="btn btn-sm btn-danger" id="setClearHistory">清空全部历史</button>
     </div>
   `;
@@ -1163,6 +1262,35 @@ function openSettingsModal() {
   $('#setReconnect').addEventListener('click', async () => {
     const result = await window.we.reconnect();
     toast(result && result.ok === false ? result.error || '连接失败' : '已开始重新连接', result && result.ok === false ? 'err' : 'ok');
+  });
+
+  $('#setReadToken').addEventListener('click', async () => {
+    try {
+      const result = await window.we.readAstrToken();
+      if (result && result.ok && result.token) {
+        $('#setToken').value = result.token;
+        toast(`已从 AstrWeChat 读取 Token（${result.apiEnabled ? 'API 已启用' : '注意：AstrWeChat 的 API 服务还没开启'}）`, 'ok', 3200);
+      } else {
+        toast((result && result.error) || '没有在 AstrWeChat 配置里找到 Token，请先在 AstrWeChat 开启 API 服务', 'err', 4200);
+      }
+    } catch (err) {
+      toast(`读取失败：${err.message}`, 'err');
+    }
+  });
+
+  $('#setExportDiag').addEventListener('click', async () => {
+    try {
+      const result = await window.we.exportDiagnostics();
+      if (result && result.ok) toast(`诊断信息已导出：${result.filePath}`, 'ok', 4200);
+      else if (!result || !result.canceled) toast('导出失败', 'err');
+    } catch (err) {
+      toast(`导出失败：${err.message}`, 'err');
+    }
+  });
+
+  $('#setOnboarding').addEventListener('click', () => {
+    closeModal();
+    setTimeout(() => openOnboardingModal(), 60);
   });
 
   $('#setTestAI').addEventListener('click', async () => {
@@ -1231,6 +1359,7 @@ async function saveSettings() {
     source: {
       baseUrl,
       token: get('#setToken').value.trim(),
+      autoTokenSync: readSwitch(get('[data-switch="autoTokenSync"]')),
       autoConnect: readSwitch(get('[data-switch="autoConnect"]')),
       autoLaunchAstrWechat: readSwitch(get('[data-switch="autoLaunchAstrWechat"]')),
       astrwechatPath: get('#setAstrPath').value.trim(),
@@ -1323,6 +1452,8 @@ function openRulesModal() {
     `,
     footer: `
       <button class="btn btn-ghost grow" id="rulesTemplates">${icon('sparkles')}添加示例规则</button>
+      <button class="btn btn-ghost btn-sm" data-rules="import">${icon('download')}导入</button>
+      <button class="btn btn-ghost btn-sm" data-rules="export">${icon('external')}导出</button>
       <button class="btn btn-ghost" data-rules="cancel">取消</button>
       <button class="btn btn-primary" data-rules="save">${icon('check')}保存全部</button>
     `,
@@ -1363,6 +1494,37 @@ function openRulesModal() {
           toast('规则已保存，新消息将按新规则筛选', 'ok');
         } catch (err) {
           toast(`保存失败：${err.message}`, 'err');
+        }
+        return;
+      }
+      if (act === 'export') {
+        try {
+          // 先把当前草稿存盘再导出，避免导出旧规则
+          const saved = await window.we.saveRules(rulesDraft);
+          state.rules = saved.rules || rulesDraft;
+          const result = await window.we.exportRules();
+          if (result && result.ok) toast(`已导出 ${result.count} 条规则：${result.filePath}`, 'ok', 4200);
+          else if (!result || !result.canceled) toast((result && result.error) || '导出失败', 'err');
+        } catch (err) {
+          toast(`导出失败：${err.message}`, 'err');
+        }
+        return;
+      }
+      if (act === 'import') {
+        try {
+          const result = await window.we.importRules();
+          if (result && result.ok) {
+            state.rules = result.rules || state.rules;
+            rulesDraft = (state.rules || []).map(cloneRule);
+            if (!rulesDraft.some((r) => r.id === ruleEditingId)) ruleEditingId = rulesDraft.length ? rulesDraft[0].id : '';
+            renderRulesList();
+            renderRuleEditor();
+            toast(`已导入并保存 ${result.imported} 条规则`, 'ok', 3000);
+          } else if (!result || !result.canceled) {
+            toast((result && result.error) || '导入失败', 'err');
+          }
+        } catch (err) {
+          toast(`导入失败：${err.message}`, 'err');
         }
       }
     });

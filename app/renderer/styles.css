@@ -1193,3 +1193,33 @@ kbd {
   .brand { width: 208px; }
   .search-kbd { display: none; }
 }
+
+/* 首次使用向导 */
+.onboarding-lead {
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: var(--text-2);
+  margin: 0 0 14px;
+}
+.onboarding-lead b { color: var(--text); }
+.onboarding-steps {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  display: grid;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text);
+}
+.onboarding-steps li::marker { color: var(--accent); font-weight: 600; }
+.onboarding-steps b { color: var(--text); font-weight: 600; }
+.onboarding-note {
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--text-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+}
+

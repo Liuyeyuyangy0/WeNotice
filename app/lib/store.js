@@ -14,6 +14,7 @@ const DEFAULT_CONFIG = {
     type: 'auto', // auto | mock
     baseUrl: 'http://127.0.0.1:5031',
     token: '',
+    autoTokenSync: true,
     autoConnect: true,
     autoLaunchAstrWechat: true,
     astrwechatPath: '',
@@ -46,7 +47,8 @@ const DEFAULT_CONFIG = {
     minimizeToTray: true,
     launchAtStartup: false,
     historyLimit: 2000,
-    minimalToast: false
+    minimalToast: false,
+    onboarded: false
   },
   filters: {
     muteSessions: [],

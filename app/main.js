@@ -272,6 +272,11 @@ function showDesktopNotification(record) {
     timeoutType: 'default'
   });
   notification.on('click', () => {
+    const patched = store.updateMessage(record.id, { read: true });
+    if (patched) {
+      sendEvent({ type: 'messages:patch', payload: patched });
+      scheduleStateBroadcast();
+    }
     showWindow();
     lastFocusId = record.id;
     sendEvent({ type: 'focus', id: record.id });
@@ -282,6 +287,66 @@ function showDesktopNotification(record) {
 function truncate(text, max) {
   const str = String(text || '').replace(/\s+/g, ' ').trim();
   return str.length > max ? `${str.slice(0, max)}…` : str;
+}
+
+// ---------------------------------------------------------------------------
+// AstrWeChat 本地配置（自动读取 Access Token）
+// ---------------------------------------------------------------------------
+
+function astrConfigPath() {
+  const base = app.getPath('appData');
+  return path.join(base, 'weflow', 'WeFlow-config.json');
+}
+
+function readAstrConfig() {
+  try {
+    const file = astrConfigPath();
+    if (!fs.existsSync(file)) return { ok: false, error: '未找到 AstrWeChat 配置文件' };
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return {
+      ok: true,
+      file,
+      token: typeof data.httpApiToken === 'string' ? data.httpApiToken.trim() : '',
+      port: Number(data.httpApiPort) || 5031,
+      host: data.httpApiHost || '127.0.0.1',
+      apiEnabled: Boolean(data.httpApiEnabled),
+      pushEnabled: Boolean(data.messagePushEnabled)
+    };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+/**
+ * AstrWeChat 重启后 Token 可能变化。连接前自动读取它本机配置里的 httpApiToken 并同步，
+ * 免去用户每次手动复制。设置里可关闭（source.autoTokenSync = false）。
+ */
+function syncTokenFromAstrConfig() {
+  const cfg = config().source || {};
+  if (cfg.autoTokenSync === false) return null;
+  const astr = readAstrConfig();
+  if (!astr.ok) {
+    bootLog(`token sync skipped: ${astr.error}`);
+    return null;
+  }
+  if (!astr.token) {
+    bootLog(`token sync skipped: no token in ${astr.file}`);
+    return null;
+  }
+  if (cfg.token === astr.token) {
+    bootLog('token sync: unchanged');
+    return null;
+  }
+  store.saveConfig({ source: { token: astr.token } });
+  bootLog('token sync: updated from AstrWeChat config');
+  return astr.token;
+}
+
+function maskSecret(value) {
+  const str = String(value || '');
+  if (!str) return '';
+  if (str.length <= 8) return '****';
+  return `${str.slice(0, 4)}…${str.slice(-4)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +442,7 @@ let sourceStarting = false;
  *  3) 轮询 /health 等待 API 就绪（最多 30s），再建立 SSE 实时推送。
  */
 async function ensureSourceReady() {
+  if (!demoActive) syncTokenFromAstrConfig();
   const cfg = config().source || {};
   if (!cfg.baseUrl) {
     source.setStatus('no-config', '未配置 API 地址');
@@ -1018,8 +1084,8 @@ function registerIpc() {
   });
 
   ipcMain.handle('src:test', async () => {
-    const result = await source.test();
-    return result;
+    syncTokenFromAstrConfig();
+    return source.test();
   });
 
   ipcMain.handle('src:reconnect', async () => {
@@ -1078,6 +1144,109 @@ function registerIpc() {
     await shell.openPath(store.dataDir);
     return { ok: true };
   });
+
+  ipcMain.handle('app:openexternal', async (_event, payload) => {
+    const url = payload && typeof payload.url === 'string' ? payload.url : '';
+    if (!/^https?:\/\//i.test(url)) return { ok: false, error: '只允许打开 http/https 链接' };
+    await shell.openExternal(url);
+    return { ok: true };
+  });
+
+  ipcMain.handle('cfg:astr-token', () => readAstrConfig());
+
+  ipcMain.handle('app:diagnostics', async () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出诊断信息',
+      defaultPath: path.join(app.getPath('documents'), `WeNotice-diagnostics-${stamp}.txt`),
+      filters: [{ name: 'Text', extensions: ['txt'] }]
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    const cfg = JSON.parse(JSON.stringify(store.config || {}));
+    if (cfg.source && cfg.source.token) cfg.source.token = maskSecret(cfg.source.token);
+    if (cfg.ai && cfg.ai.apiKey) cfg.ai.apiKey = maskSecret(cfg.ai.apiKey);
+    const bootLogFile = path.join(app.getPath('userData'), 'boot.log');
+    const launcherLogFile = path.join(path.dirname(app.getPath('exe')), 'WeNotice-launcher.log');
+    const tailText = (file, max = 8000) => {
+      try {
+        const text = fs.readFileSync(file, 'utf8');
+        return text.length > max ? text.slice(-max) : text;
+      } catch (_err) {
+        return '(无)';
+      }
+    };
+    const lines = [
+      'WeNotice diagnostics',
+      `generated: ${new Date().toISOString()}`,
+      `version: ${app.getVersion()}`,
+      `packaged: ${app.isPackaged}`,
+      `exe: ${app.getPath('exe')}`,
+      `userData: ${app.getPath('userData')}`,
+      `dataDir: ${store.dataDir}`,
+      `runtime: ${process.platform} ${process.arch} node=${process.versions.node} electron=${process.versions.electron} chrome=${process.versions.chrome}`,
+      `source: ${source.status.state} — ${source.status.message || ''}`,
+      `paused: ${paused} | demo: ${demoActive} | backfilled: ${backfilled}`,
+      `history: ${store.history.length} | rules: ${store.rules.length}`,
+      '',
+      '--- config (secrets masked) ---',
+      JSON.stringify(cfg, null, 2),
+      '',
+      '--- AstrWeChat config ---',
+      JSON.stringify(readAstrConfig(), null, 2),
+      '',
+      '--- boot.log (tail) ---',
+      tailText(bootLogFile),
+      '',
+      '--- WeNotice-launcher.log (tail) ---',
+      tailText(launcherLogFile)
+    ];
+    fs.writeFileSync(result.filePath, lines.join('\n'), 'utf8');
+    return { ok: true, filePath: result.filePath };
+  });
+
+  ipcMain.handle('rules:export', async () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出通知规则',
+      defaultPath: path.join(app.getPath('documents'), `WeNotice-rules-${stamp}.json`),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    const payload = {
+      app: 'WeNotice',
+      version: app.getVersion(),
+      exportedAt: new Date().toISOString(),
+      rules: store.rules
+    };
+    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, filePath: result.filePath, count: store.rules.length };
+  });
+
+  ipcMain.handle('rules:import', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入通知规则',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePaths || !result.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const data = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8'));
+      const list = Array.isArray(data) ? data : Array.isArray(data.rules) ? data.rules : [];
+      if (!list.length) return { ok: false, error: '文件里没有可导入的规则' };
+      const normalized = list.map((rule, index) => {
+        const clean = normalizeRule(rule);
+        if (!clean.id) clean.id = `rule-import-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+        return clean;
+      });
+      const merged = [...store.rules, ...normalized];
+      store.saveRules(merged);
+      broadcastState();
+      return { ok: true, imported: normalized.length, rules: merged };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
+
   ipcMain.handle('app:quit', () => {
     isQuitting = true;
     app.quit();
@@ -1151,10 +1320,15 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
     const cfg = config().source || {};
     if (hasFlag('demo') || cfg.demoMode || (IS_SHOT && !hasFlag('no-demo'))) {
       startDemo({ fast: true });
-    } else if (cfg.autoConnect !== false && cfg.baseUrl && cfg.token) {
-      ensureSourceReady();
     } else {
-      source.setStatus('no-config', cfg.token ? '已停止监听（自动连接已关闭）' : '尚未配置 AstrWeChat Access Token');
+      // 允许在 Token 为空时也从 AstrWeChat 本机配置自动补齐（用户无需手动复制）
+      if (!cfg.token) syncTokenFromAstrConfig();
+      const readyCfg = config().source || {};
+      if (readyCfg.autoConnect !== false && readyCfg.baseUrl && readyCfg.token) {
+        ensureSourceReady();
+      } else {
+        source.setStatus('no-config', readyCfg.token ? '已停止监听（自动连接已关闭）' : '尚未配置 AstrWeChat Access Token');
+      }
     }
 
     app.on('activate', () => {

@@ -147,7 +147,11 @@ $env:ELECTRON_RUN_AS_NODE = $null
 - **通知中心**：通知中心 / 未读 / 收藏 / 已忽略 / 按 12 类分类计数 / 全部消息；搜索（Ctrl+K）、最新/重要优先排序、全部已读、导出 JSON
 - **详情面板**：分类、会话、发送者、命中原因、AI 摘要、原始 JSON、收藏/忽略/标记已读/复制
 - **规则引擎**：内置 12 类词库 + 5 个一键示例模板；自定义规则支持关键词/正则/发送者/会话/范围（全部、群聊、私聊、公众号、服务号）与 5 种动作（桌面提醒、只列表、忽略、收藏、必须提醒）
-- **通知策略**：免打扰时段（支持跨零点）、同会话合并窗口、每分钟频率上限、仅重要分类、提示音、通知点击直达消息
+- **通知策略**：免打扰时段（支持跨零点）、同会话合并窗口、每分钟频率上限、仅重要分类、提示音、通知点击直达消息并自动标记已读
+- **首次使用向导**：首次启动引导「演示体验 → 连接 AstrWeChat → 开启 API → 测试连接」，可从 设置 → 应用 → 新手引导 再次打开
+- **Token 自动读取**：连接前自动从 `%APPDATA%\weflow\WeFlow-config.json` 读取 AstrWeChat 的 API Token，AstrWeChat 重启换 Token 也无需手动复制（设置里可关闭或手动覆盖）
+- **规则导入 / 导出**：规则弹窗底部支持 JSON 导入导出，方便备份、迁移和分享规则
+- **诊断导出**：设置 → 应用 → 导出诊断信息，生成脱敏的配置 + 启动日志，反馈问题时直接附带
 - **托盘常驻**：关闭窗口按设置隐藏到托盘；托盘菜单显示未读数/连接状态，可暂停提醒、切换演示、退出
 - **启动器托管托盘**：便携版的托盘图标由 `WeNotice.exe` 启动器（原生 WinForms）显示——部分 Windows 环境下 Electron 自带托盘不显示，改成启动器托管更稳；应用通过本地回环控制接口（随机端口 + 随机 Token，写入 `resources\.data\control.json`）与启动器通信
 - **全局快捷键**：无论窗口最小化还是隐藏到托盘，按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`） 都能把 WeNotice 找回（托盘不可见时的兜底）
@@ -172,7 +176,8 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 ## 7. 已知限制与风险
 
-- **AstrWeChat 是单人维护的 AGPL-3.0 项目**，本机 4.1.15.56 兼容性尚未实测；微信升级可能让读取失效，需等待 AstrWeChat/WeFlow 更新
+- **AstrWeChat 是单人维护的 AGPL-3.0 项目**，本机（Windows 微信 4.1.15.56 + AstrWeChat 1.5.0）已实测跑通；但微信升级可能让读取失效，需等待 AstrWeChat/WeFlow 更新
+- **Release 不附带 AstrWeChat 安装包**：AstrWeChat 为 AGPL-3.0 且涉及腾讯/微信数据合规风险，WeNotice 的 MIT 发布包只包含自身代码；请从 [AstrWeChat Releases](https://github.com/CMKH1337/Astrwechat/releases/latest) 自行安装（向导里也有「下载 AstrWeChat」按钮）
 - AstrWeChat 取密钥需要微信处于未登录状态；wcdb 原生组件有有效期（旧版本曾出现过期提示，升级 AstrWeChat 即可）
 - WeNotice 只负责「读消息 + 筛选 + 通知」，**不支持发送/回复**（AstrWeChat 的发送依赖 UI 自动化，稳定性另说）
 - 桌面通知依赖 Windows 通知权限；若系统未开启，应用内仍会收到消息
@@ -185,7 +190,11 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 ## 8. 常见问题
 
-**Q：测试连接失败 / 401？** A：确认 AstrWeChat 已启动且 API 服务开启；Token 从 AstrWeChat 设置里重新复制（软件重启后 Token 可能变化）；确认端口 5031 没被占用。
+**Q：测试连接失败 / 401？** A：确认 AstrWeChat 已启动且 API 服务开启；新版默认会**自动读取** AstrWeChat 配置里的 Token（设置 → 数据源 → 「自动读取 Token」），也可以点输入框旁的「自动读取」按钮手动同步；确认端口 5031 没被占用。
+
+**Q：第一次打开弹出的「欢迎使用 WeNotice」向导是什么？怎么关掉 / 再打开？** A：这是首次使用向导（演示 → 连接 AstrWeChat → 开启 API → 测试连接），每台电脑只出现一次。点「稍后」会关闭并记住；想再看：设置 → 应用 → 新手引导。
+
+**Q：为什么 release 里不附带 AstrWeChat 安装包？** A：AstrWeChat 使用 AGPL-3.0 且涉及微信数据读取的合规风险，把它打进 WeNotice 的 MIT 发布包既会让许可变复杂，也可能因微信法务问题让整个发布下架（同类项目 chatlog 已因律师函删库）。因此 WeNotice 只在向导里提供官方下载入口，由用户自行安装 AstrWeChat——功能上已经做到「打开 WeNotice 自动检测并拉起 AstrWeChat」，安装只需一次。
 
 **Q：状态显示「连接异常：AstrWeChat 尚未完成微信连接」？** A：说明 API 与 Token 都正常，但 AstrWeChat 还没接上微信数据库。打开 AstrWeChat → 左侧「微信连接」完成「自动检测 → 自动获取密钥（需微信先退出登录）→ 登录微信 → 连接数据库」，然后回 WeNotice 点「重新连接」。侧边栏和空状态页都会给出这条指引。
 

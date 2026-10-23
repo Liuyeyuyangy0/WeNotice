@@ -21,10 +21,13 @@ contextBridge.exposeInMainWorld('we', {
   saveConfig: (patch) => ipcRenderer.invoke('cfg:save', { patch }),
   saveRules: (rules) => ipcRenderer.invoke('rules:save', { rules }),
   resetRules: () => ipcRenderer.invoke('rules:reset'),
+  exportRules: () => ipcRenderer.invoke('rules:export'),
+  importRules: () => ipcRenderer.invoke('rules:import'),
 
   // 数据源
   testSource: () => ipcRenderer.invoke('src:test'),
   reconnect: () => ipcRenderer.invoke('src:reconnect'),
+  readAstrToken: () => ipcRenderer.invoke('cfg:astr-token'),
   togglePause: (value) => ipcRenderer.invoke('app:pause', { value }),
   toggleDemo: (value) => ipcRenderer.invoke('demo:toggle', { value }),
   simulateMessage: () => ipcRenderer.invoke('demo:simulate'),
@@ -34,6 +37,8 @@ contextBridge.exposeInMainWorld('we', {
 
   // 应用
   openDataDir: () => ipcRenderer.invoke('app:openpath'),
+  openExternal: (url) => ipcRenderer.invoke('app:openexternal', { url }),
+  exportDiagnostics: () => ipcRenderer.invoke('app:diagnostics'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
   // 窗口控制
