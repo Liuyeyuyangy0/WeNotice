@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('we', {
   // 数据源
   testSource: () => ipcRenderer.invoke('src:test'),
   reconnect: () => ipcRenderer.invoke('src:reconnect'),
+  testQq: () => ipcRenderer.invoke('qq:test'),
+  reconnectQq: () => ipcRenderer.invoke('qq:reconnect'),
   readAstrToken: () => ipcRenderer.invoke('cfg:astr-token'),
   enableAstrApi: () => ipcRenderer.invoke('astr:enable-api'),
   togglePause: (value) => ipcRenderer.invoke('app:pause', { value }),

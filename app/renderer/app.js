@@ -36,6 +36,7 @@ const state = {
   templates: [],
   rules: [],
   status: { state: 'idle', message: '未启动' },
+  qq: { state: 'disabled', message: '' },
   paused: false,
   demo: false,
   stats: { total: 0, inbox: 0, unread: 0, today: 0 },
@@ -287,6 +288,11 @@ function cacheRefs() {
   refs.btnTest = $('#btnTest');
   refs.sourceDot = $('#sourceDot');
   refs.sourceState = $('#sourceState');
+  refs.qqCard = $('#qqCard');
+  refs.qqDot = $('#qqDot');
+  refs.qqState = $('#qqState');
+  refs.btnTestQq = $('#btnTestQq');
+  refs.btnQqReconnect = $('#btnQqReconnect');
   refs.sidebarStats = $('#sidebarStats');
   refs.demoBanner = $('#demoBanner');
   refs.statusDot = $('#statusDot');
@@ -309,6 +315,7 @@ function hydrate(data) {
   if (Array.isArray(data.templates)) state.templates = data.templates;
   if (Array.isArray(data.rules)) state.rules = data.rules;
   if (data.status) state.status = data.status;
+  if (data.qq) state.qq = data.qq;
   if (typeof data.paused === 'boolean') state.paused = data.paused;
   if (typeof data.demo === 'boolean') state.demo = data.demo;
   if (data.stats) state.stats = data.stats;
@@ -330,6 +337,11 @@ function handleEvent(payload) {
     case 'source:status': {
       state.status = payload.payload || state.status;
       renderStatus();
+      renderSidebar();
+      break;
+    }
+    case 'qq:status': {
+      state.qq = payload.payload || state.qq;
       renderSidebar();
       break;
     }
@@ -486,10 +498,32 @@ function renderSidebar() {
     }).join('');
   }
 
-  // 侧栏底部数据源卡片
-  const info = statusInfo();
-  if (refs.sourceDot) refs.sourceDot.className = `source-dot ${info.dotClass}`;
-  if (refs.sourceState) setText(refs.sourceState, info.sourceMessage);
+  // 侧栏底部数据源卡片（微信 / AstrWeChat 单独展示，不受 QQ 状态影响）
+  const wxDotMap = { connected: 'is-connected', connecting: 'is-reconnecting', launching: 'is-reconnecting', reconnecting: 'is-reconnecting', error: 'is-error' };
+  const wxDot = state.demo ? 'is-demo' : wxDotMap[(state.status && state.status.state) || ''] || '';
+  const wxText = state.demo
+    ? '演示数据源 · 样例消息'
+    : (state.status && state.status.message) || '尚未连接';
+  if (refs.sourceDot) refs.sourceDot.className = `source-dot ${wxDot}`;
+  if (refs.sourceState) setText(refs.sourceState, wxText);
+
+  // QQ 数据源卡片（启用后显示；演示模式隐藏）
+  const qqCfg = (state.config && state.config.qq) || {};
+  const qq = state.qq || { state: 'disabled', message: '' };
+  const showQq = !state.demo && (Boolean(qqCfg.enabled) || (qq.state && qq.state !== 'disabled'));
+  if (refs.qqCard) refs.qqCard.hidden = !showQq;
+  if (showQq) {
+    const qqMap = {
+      connected: { dot: 'is-connected', text: `已连接${qq.selfId ? ` · ${qq.selfId}` : ''}` },
+      connecting: { dot: 'is-reconnecting', text: '连接中…' },
+      reconnecting: { dot: 'is-reconnecting', text: '重连中…' },
+      error: { dot: 'is-error', text: qq.message || '连接异常' },
+      disabled: { dot: '', text: '未启用' }
+    };
+    const qqInfo = qqMap[qq.state] || { dot: '', text: qq.message || '未连接' };
+    if (refs.qqDot) refs.qqDot.className = `source-dot ${qqInfo.dot}`;
+    if (refs.qqState) setText(refs.qqState, qqInfo.text);
+  }
   if (refs.btnDemo) setText(refs.btnDemo, state.demo ? '退出演示' : '演示模式');
   if (refs.sidebarStats) {
     refs.sidebarStats.innerHTML = `今日 <b>${state.stats.today}</b> · 未读 <b>${state.stats.unread}</b> · 共 <b>${state.stats.total}</b>`;
@@ -531,6 +565,23 @@ function statusInfo() {
   }
   const status = state.status || { state: 'idle', message: '' };
   const baseUrl = (state.config && state.config.source && state.config.source.baseUrl) || '';
+  const qq = state.qq || { state: 'disabled', message: '' };
+  const qqEnabled = Boolean(state.config && state.config.qq && state.config.qq.enabled);
+  const qqConnected = qq.state === 'connected';
+  // QQ 单独作为数据源时（微信未配置/连接失败），顶部状态与状态栏以 QQ 为准
+  const qqIsPrimary = qqEnabled && qqConnected && ['no-config', 'error', 'idle'].includes(status.state);
+  if (qqIsPrimary) {
+    const label = qq.selfId ? `QQ 已连接（${qq.selfId}）` : 'QQ 已连接';
+    return {
+      pillClass: 'is-connected',
+      pillText: 'QQ 已连接',
+      dotClass: 'is-connected',
+      sourceMessage: qq.message || label,
+      statusText: `数据源：QQ 数据源 · 已连接${qq.selfId ? `（${qq.selfId}）` : ''}`,
+      hint: (state.config.qq && state.config.qq.wsUrl) || '',
+      title: label
+    };
+  }
   switch (status.state) {
     case 'connected':
       return {
@@ -896,6 +947,25 @@ function bindStaticEvents() {
 
   // 数据源操作
   refs.btnTest.addEventListener('click', testConnection);
+  refs.btnTestQq.addEventListener('click', async () => {
+    const original = refs.btnTestQq.textContent;
+    refs.btnTestQq.disabled = true;
+    refs.btnTestQq.textContent = '测试中…';
+    try {
+      const result = await window.we.testQq();
+      if (result && result.ok) toast(`QQ 数据源连接成功${result.selfId ? `（账号 ${result.selfId}）` : ''}`, 'ok', 3200);
+      else toast((result && (result.error || result.hint)) || 'QQ 数据源连接失败', 'err', 5200);
+    } catch (err) {
+      toast(`QQ 测试失败：${err.message}`, 'err');
+    } finally {
+      refs.btnTestQq.disabled = false;
+      refs.btnTestQq.textContent = original || '测试连接';
+    }
+  });
+  refs.btnQqReconnect.addEventListener('click', async () => {
+    const result = await window.we.reconnectQq();
+    toast(result && result.ok === false ? result.error || 'QQ 连接失败' : '已开始重新连接 QQ 数据源', result && result.ok === false ? 'err' : 'ok');
+  });
   refs.btnDemo.addEventListener('click', () => window.we.toggleDemo(!state.demo));
   $('#btnDemoBanner').addEventListener('click', () => window.we.toggleDemo(false));
 
@@ -1081,6 +1151,7 @@ function settingsBody() {
   const ai = cfg.ai || {};
   const appCfg = cfg.app || {};
   const filters = cfg.filters || {};
+  const qq = cfg.qq || {};
   const on = (v) => (v ? ' is-on' : '');
   const checked = (v) => (v ? ' checked' : '');
 
@@ -1139,6 +1210,36 @@ function settingsBody() {
       <button class="btn btn-sm" id="setReconnect">重新连接</button>
     </div>
     <div class="test-result" id="sourceTestResult" hidden></div>
+
+    <div class="section-title">QQ 数据源 · OneBot 11（可选）</div>
+    <div class="hint" style="margin:0 0 10px">
+      通过 <b>OneBot 11</b> 协议只读接收 QQ 消息。推荐搭配
+      <a href="#" data-open-external="https://github.com/NapNeko/NapCatQQ" style="color:var(--accent)">NapCatQQ</a>
+      （在 QQNT 上运行，提供 WebSocket 服务端）；在 NapCat 里开启「WebSocket 服务器」后，把地址填到这里即可。
+      本应用不会向 QQ 发送任何消息。
+    </div>
+    <div class="setting-row">
+      <div class="setting-text"><div class="setting-title">启用 QQ 消息接收</div><div class="setting-desc">打开后后台会自动连接 OneBot WebSocket 服务</div></div>
+      <button class="switch${on(qq.enabled)}" data-switch="qqEnabled" type="button" aria-checked="${Boolean(qq.enabled)}"></button>
+    </div>
+    <div class="field">
+      <label>OneBot WebSocket 地址</label>
+      <input class="input" id="setQqWsUrl" value="${escapeHtml(qq.wsUrl || 'ws://127.0.0.1:3001')}" placeholder="ws://127.0.0.1:3001">
+      <div class="hint">NapCat 默认 WebSocket 服务端为 <b>ws://127.0.0.1:3001</b>；如果配置了 Token，填在下面。</div>
+    </div>
+    <div class="field">
+      <label>Access Token（可选）</label>
+      <input class="input" id="setQqToken" type="password" value="${escapeHtml(qq.token || '')}" placeholder="NapCat WebSocket 服务端配置的 Token，留空表示未设置">
+    </div>
+    <div class="setting-row">
+      <div class="setting-text"><div class="setting-title">启动时自动连接 QQ</div><div class="setting-desc">打开应用后自动连接上面的 OneBot WebSocket</div></div>
+      <button class="switch${on(qq.autoConnect !== false)}" data-switch="qqAutoConnect" type="button" aria-checked="${qq.autoConnect !== false}"></button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-sm" id="setTestQq">测试连接</button>
+      <button class="btn btn-sm" id="setReconnectQq">重新连接</button>
+    </div>
+    <div class="test-result" id="qqTestResult" hidden></div>
 
     <div class="section-title">提醒</div>
     <div class="setting-row">
@@ -1268,6 +1369,41 @@ function openSettingsModal() {
   $('#setReconnect').addEventListener('click', async () => {
     const result = await window.we.reconnect();
     toast(result && result.ok === false ? result.error || '连接失败' : '已开始重新连接', result && result.ok === false ? 'err' : 'ok');
+  });
+
+  // QQ 数据源
+  const qqTestBox = $('#qqTestResult');
+  $('#setTestQq').addEventListener('click', async () => {
+    qqTestBox.hidden = false;
+    qqTestBox.className = 'test-result';
+    qqTestBox.textContent = '正在连接 QQ OneBot…';
+    try {
+      const result = await window.we.testQq();
+      qqTestBox.className = `test-result ${result && result.ok ? 'is-ok' : 'is-err'}`;
+      const lines = [];
+      if (result && result.url) lines.push(`地址：${result.url}`);
+      lines.push(`连接：${result && result.ok ? '成功' : '失败'}`);
+      if (result && result.selfId) lines.push(`机器人账号：${result.selfId}`);
+      if (result && result.error) lines.push(`错误：${result.error}`);
+      if (result && result.hint) lines.push(`提示：${result.hint}`);
+      qqTestBox.textContent = lines.join('\n');
+    } catch (err) {
+      qqTestBox.className = 'test-result is-err';
+      qqTestBox.textContent = `测试失败：${err.message}`;
+    }
+  });
+
+  $('#setReconnectQq').addEventListener('click', async () => {
+    const result = await window.we.reconnectQq();
+    toast(result && result.ok === false ? result.error || 'QQ 连接失败' : '已开始重新连接 QQ 数据源', result && result.ok === false ? 'err' : 'ok');
+  });
+
+  $$('#modalRoot [data-open-external]').forEach((el) => {
+    el.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const url = el.dataset.openExternal;
+      if (url) await window.we.openExternal(url);
+    });
   });
 
   $('#setReadToken').addEventListener('click', async () => {
@@ -1425,6 +1561,12 @@ async function saveSettings() {
       pollFallback: readSwitch(get('[data-switch="pollFallback"]')),
       backfillRecent: readSwitch(get('[data-switch="backfillRecent"]')),
       backfillHours: clampNumber(get('#setBackfillHours').value, 1, 72, 12)
+    },
+    qq: {
+      enabled: readSwitch(get('[data-switch="qqEnabled"]')),
+      wsUrl: get('#setQqWsUrl').value.trim(),
+      token: get('#setQqToken').value.trim(),
+      autoConnect: readSwitch(get('[data-switch="qqAutoConnect"]'))
     },
     notify: {
       desktop: readSwitch(get('[data-switch="desktop"]')),

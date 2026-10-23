@@ -24,6 +24,13 @@ const DEFAULT_CONFIG = {
     backfillHours: 12,
     demoMode: false
   },
+  qq: {
+    enabled: false,
+    // OneBot 11 协议端（推荐 NapCatQQ）的 WebSocket 服务端地址
+    wsUrl: 'ws://127.0.0.1:3001',
+    token: '',
+    autoConnect: true
+  },
   notify: {
     desktop: true,
     sound: true,

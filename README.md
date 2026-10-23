@@ -68,6 +68,7 @@
 - 消息先经过**规则引擎**：`系统事件 → 自己发送 → 静音会话 → 用户规则（按优先级）→ 重点会话 → 内置词库识别`
 - 判定结果三档：`notify`（弹桌面通知 + 进通知中心）、`list`（只进通知中心）、`ignore`（只在「全部消息」）
 - 内置识别覆盖 12 类：公告通知、@我/全员、安全验证、交易财务、物流快递、日程安排、工作事务、文件、链接、系统消息、普通聊天、自定义
+- **可选：QQ 消息源（v1.2.0+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
 
 ---
 
@@ -147,6 +148,20 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 ---
 
+## 4.1 接入 QQ（可选，OneBot 11）
+
+WeNotice 不实现 QQ 登录协议，而是作为 **OneBot 11 WebSocket 客户端**，连接本机运行的 QQ 协议端**只读接收**消息（不发消息，不用 QQ 账号跑机器人指令）。推荐协议端：[NapCatQQ](https://github.com/NapNeko/NapCatQQ)（基于 NTQQ，活跃维护，自带 OneBot 11 WebSocket 服务端）。
+
+1. 安装并登录 NapCatQQ（它基于 Windows QQNT 客户端；按 NapCat 官方文档安装/启动，首次扫码登录）。
+2. 在 NapCat 里开启 **「WebSocket 服务器」**（NapCat WebUI → 网络配置 → 添加 WebSocket 服务器），默认地址 `ws://127.0.0.1:3001`；如果设置了 Token，记下来。
+3. 打开 WeNotice → 设置 → 「QQ 数据源 · OneBot 11」→ 打开「启用 QQ 消息接收」→ 填 OneBot WebSocket 地址（默认 `ws://127.0.0.1:3001`）和 Token（如有）→ 点「测试连接」。
+4. 连接成功后，侧边栏会出现「QQ 数据源 · OneBot / 已连接 · QQ号」，QQ 群公告、验证码、快递等消息会和微信消息一起进入通知中心、按同一套规则分类与提醒。
+5. 也可在设置里关闭「启动时自动连接 QQ」或整个 QQ 数据源——只想要微信时不影响原有使用。
+
+> 安全与合规：WeNotice 只作为 WebSocket 客户端读取 OneBot 事件，**不会向 QQ 发送消息**。QQ 协议端本身属于第三方非官方实现，存在账号风控风险，请自行评估；WeNotice 的 MIT 发布包不包含任何 QQ 协议端代码。
+
+---
+
 ## 5. 功能清单
 
 - **通知中心**：通知中心 / 未读 / 收藏 / 已忽略 / 按 12 类分类计数 / 全部消息；搜索（Ctrl+K）、最新/重要优先排序、全部已读、导出 JSON
@@ -163,6 +178,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 - **全局快捷键**：无论窗口最小化还是隐藏到托盘，按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`） 都能把 WeNotice 找回（托盘不可见时的兜底）
 - **最小化到托盘**：点标题栏「—」默认隐藏到系统托盘而不是任务栏（设置 → 应用可关）；首次最小化会弹出气泡提示图标位置，托盘图标单击/双击都能恢复窗口
 - **数据源健壮性**：SSE 断线指数退避重连、心跳看门狗、401/403 Token 失效提示、轮询回退
+- **QQ 消息源（可选，OneBot 11）**：作为 WebSocket 客户端连接本机 NapCatQQ 等 OneBot 11 协议端，只读接收 QQ 群/私聊消息，与微信消息统一分类、规则、通知、托盘与快捷键；连接状态显示「QQ 已连接 · QQ号」；可在设置里单独启停或配置地址/Token
 - **自动拉起 AstrWeChat**：启动时检测本地 API，未运行时自动定位并拉起 AstrWeChat、等待 API 就绪后再连接；可在设置中关闭或手动指定路径
 - **连接后回填**：连上数据源时自动补齐最近 12 小时消息（可关闭），避免刚打开时列表空白；回填消息带「回填」标记、不弹桌面通知、不计入未读
 - **内容清洗**：公众号文章/小程序/文件等 XML 消息自动提取标题与摘要，不再显示原始 XML；公众号普通推文默认只归档不打扰，标题命中关键词才进列表/提醒
@@ -191,6 +207,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 - **不要把 WeNotice 放在受限目录**（AI 代理工作区、同步盘、受控企业目录等）：Windows 会拒绝对该进程注册托盘图标（`Shell_NotifyIcon` ACCESS_DENIED），表现为托盘无图标。请放到普通用户目录，详见 `docs/TRAY.md`
 - 未签名的本地构建首次运行会被 SmartScreen 提示「发布者未知」，这是 Windows 对未知程序的常规拦截，不是应用行为
 - 本项目不含微信客户端修改，不注入进程；但第三方读取微信数据本身存在账号风险，请自行判断
+- **QQ 数据源依赖第三方协议端**（如 NapCatQQ）：WeNotice 只作为 OneBot 11 WebSocket 客户端读取事件、不向 QQ 发送消息；QQ 协议端本身属于非官方实现，存在账号风控风险，且不受本项目控制
 
 ---
 
@@ -222,6 +239,12 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 **Q：会封号吗？** A：WeNotice 不注入微信、不模拟登录，只读 AstrWeChat 解密后的本地数据；风险主要来自 AstrWeChat 读取数据库本身，以及微信对第三方读取的打击态度。
 
+**Q：怎么接 QQ 消息？** A：WeNotice 不自带 QQ 协议，需要先在本机跑一个 OneBot 11 协议端，推荐 NapCatQQ（基于 Windows QQNT）。步骤：装好 NapCat 并扫码登录 → NapCat WebUI 里开启「WebSocket 服务器」（默认 `ws://127.0.0.1:3001`）→ WeNotice 设置 → 「QQ 数据源 · OneBot 11」→ 启用并填地址/Token → 测试连接。详细步骤见 §4.1。WeNotice 只读接收，不会向 QQ 发消息。
+
+**Q：QQ 显示已连接，但收不到消息？** A：①确认 NapCat 的 WebSocket 服务器确实在监听（NapCat 日志里能看到连接）；②确认 QQ 账号在 NapCat 里处于登录状态、并且确实有新消息；③如果 NapCat 配置了 Token，WeNotice 里必须填一样的；④点侧栏 QQ 卡片上的「测试连接」看具体错误；⑤QQ 私聊/群消息都需要 OneBot 端推送 `message` 事件（NapCat 默认会推）。
+
+**Q：微信和 QQ 同时开，会不会互相干扰？** A：不会。两者是独立数据源：任一连接成功就能工作；顶部胶囊与状态栏会显示主数据源（微信优先，微信未配置时显示 QQ）；侧边栏两张数据源卡片分别显示各自状态；消息统一进入同一个通知中心，规则与免打扰等策略共用。
+
 ---
 
 ## 9. 目录结构与开发
@@ -235,6 +258,7 @@ WeNotice/
 │  │  ├─ store.js          配置/规则/历史持久化
 │  │  ├─ rules.js          规则引擎 + 内置识别 + 示例模板
 │  │  ├─ source.js         AstrWeChat/WeFlow HTTP+SSE 数据源适配
+│  │  ├─ qqsource.js       QQ 数据源适配（OneBot 11 WebSocket 客户端）
 │  │  ├─ astr.js           AstrWeChat 进程检测 / 自动拉起 / API 健康等待
 │  │  ├─ content.js        公众号/XML 消息内容清洗
 │  │  ├─ ai.js             OpenAI 兼容 AI 二次判定
@@ -244,6 +268,7 @@ WeNotice/
 ├─ tools/
 │  ├─ download-electron.mjs  下载 Electron 预编译包（npmmirror）
 │  ├─ mock-weflow.mjs        WeFlow/AstrWeChat API 模拟服务（无微信时联调）
+│  ├─ mock-onebot.mjs        OneBot 11 WebSocket 模拟服务端（无 QQ 时联调）
 │  ├─ launcher.cs           WeNotice.exe 启动器源码（C#，csc 编译）
 │  ├─ build-portable.ps1    便携版打包脚本
 │  ├─ gen-icons.py          应用图标生成（Pillow）

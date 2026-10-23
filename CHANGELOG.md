@@ -1,5 +1,16 @@
 # 更新日志
 
+## v1.2.0（QQ 消息源）
+
+- **新增 QQ 数据源（OneBot 11）**：WeNotice 作为 WebSocket 客户端连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)），只读接收 QQ 群/私聊消息，与微信消息统一进入通知中心、共用分类/规则/通知/托盘/快捷键
+- 设置新增「QQ 数据源 · OneBot 11」区块：启用开关、WebSocket 地址（默认 `ws://127.0.0.1:3001`）、Access Token、启动时自动连接、测试连接/重新连接
+- 侧边栏新增 QQ 数据源卡片（状态 + 账号 + 测试/重连）；微信未配置时顶部胶囊与状态栏会显示「QQ 已连接」作为主数据源
+- QQ 消息解析：文本/@/图片/表情/语音/视频/文件/JSON/XML/合并转发/回复，统一走内容清洗与规则引擎
+- 连接健壮性：OneBot 心跳（meta_event）等待账号信息、断线指数退避重连（1.5s×1.8，上限 30s）、连接超时
+- 只读安全：WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息
+- 新增 `tools/mock-onebot.mjs`（无 QQ 时的 OneBot 11 模拟服务端）用于联调
+- README 新增 §4.1「接入 QQ（可选，OneBot 11）」与对应 FAQ/限制说明
+
 ## v1.1.3（Token 与一键开启修复）
 
 - **修复 Token 加密读取**：AstrWeChat 会把 `httpApiToken` 用系统加密保存成 `safe:...`（口令模式为 `lock:...`）。现在会先解密再使用；解密失败时给出可操作提示，不再把密文当 Token 用导致 401

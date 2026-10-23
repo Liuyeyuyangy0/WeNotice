@@ -9,6 +9,7 @@ const http = require('http');
 const { Store } = require('./lib/store');
 const { WeFlowSource } = require('./lib/source');
 const { DemoSource } = require('./lib/demo');
+const { QqSource } = require('./lib/qqsource');
 const { AIClassifier } = require('./lib/ai');
 const AstrWechat = require('./lib/astr');
 const { evaluate, CATEGORIES, normalizeRule, RULE_TEMPLATES, normalizeText } = require('./lib/rules');
@@ -90,6 +91,7 @@ let mainWindow = null;
 let tray = null;
 let store = null;
 let source = null;
+let qqSource = null;
 let demo = null;
 let ai = null;
 let paused = false;
@@ -97,9 +99,10 @@ let demoActive = false;
 let isQuitting = false;
 let stateBroadcastTimer = null;
 let trayRefreshTimer = null;
+let lastFocusId = '';
+let qqStatus = { state: 'disabled', message: 'QQ 数据源未启用' };
 const lastNotifiedAt = new Map(); // sessionId -> ms
 const notifyHistory = []; // 最近一分钟的通知时间戳
-let lastFocusId = '';
 
 const MERGE_MAP_LIMIT = 300;
 
@@ -690,6 +693,14 @@ function onSourceStatus(status) {
   }
 }
 
+function onQqStatus(status) {
+  qqStatus = { state: status.state, message: status.message || '', selfId: status.selfId || '' };
+  bootLog(`qq status: ${status.state}${status.message ? ` — ${status.message}` : ''}`);
+  sendEvent({ type: 'qq:status', payload: qqStatus });
+  scheduleStateBroadcast();
+  scheduleTrayRefresh();
+}
+
 // ---------------------------------------------------------------------------
 // 广播 / 事件
 // ---------------------------------------------------------------------------
@@ -704,6 +715,7 @@ function statePayload() {
     config: store.config,
     rules: store.rules,
     status: source ? source.status : { state: 'idle', message: '未启动' },
+    qq: qqStatus,
     paused,
     demo: demoActive,
     stats: getStats(),
@@ -1237,6 +1249,7 @@ function registerIpc() {
   ipcMain.handle('cfg:save', async (_event, payload) => {
     const patch = payload && payload.patch && typeof payload.patch === 'object' ? payload.patch : {};
     const before = JSON.stringify(store.config.source || {});
+    const qqBefore = JSON.stringify(store.config.qq || {});
     store.saveConfig(patch);
     applyAutoLaunch();
     broadcastState();
@@ -1244,6 +1257,14 @@ function registerIpc() {
     const after = JSON.stringify(store.config.source || {});
     if (before !== after && !demoActive) {
       await ensureSourceReady();
+    }
+    if (qqSource) {
+      const qqAfter = JSON.stringify(store.config.qq || {});
+      if (qqBefore !== qqAfter) {
+        qqSource.stop();
+        const qqCfg = store.config.qq || {};
+        if (qqCfg.enabled && qqCfg.autoConnect !== false) qqSource.connect();
+      }
     }
     return { config: store.config };
   });
@@ -1280,6 +1301,16 @@ function registerIpc() {
     stopDemo();
     broadcastState();
     return ensureSourceReady();
+  });
+
+  ipcMain.handle('qq:test', async () => (qqSource ? qqSource.test() : { ok: false, error: 'QQ 数据源未初始化' }));
+
+  ipcMain.handle('qq:reconnect', async () => {
+    if (!qqSource) return { ok: false, error: 'QQ 数据源未初始化' };
+    qqSource.stop();
+    const result = qqSource.connect();
+    if (result && result.ok) return { ok: true, url: result.url };
+    return { ok: false, error: result && result.error };
   });
 
   ipcMain.handle('app:pause', (_event, payload) => {
@@ -1394,6 +1425,8 @@ function registerIpc() {
       `dataDir: ${store.dataDir}`,
       `runtime: ${process.platform} ${process.arch} node=${process.versions.node} electron=${process.versions.electron} chrome=${process.versions.chrome}`,
       `source: ${source.status.state} — ${source.status.message || ''}`,
+      `qq: ${qqStatus.state} — ${qqStatus.message || ''}`,
+      `qq config: ${JSON.stringify(Object.assign({}, (config().qq || {}), { token: (config().qq || {}).token ? '***' : '' }))}`,
       `paused: ${paused} | demo: ${demoActive} | backfilled: ${backfilled}`,
       `history: ${store.history.length} | rules: ${store.rules.length}`,
       '',
@@ -1520,6 +1553,9 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
     source = new WeFlowSource(config);
     source.on('status', onSourceStatus);
     source.on('message', (evt) => ingestEvent(evt, 'weflow'));
+    qqSource = new QqSource(config);
+    qqSource.on('status', onQqStatus);
+    qqSource.on('message', (evt) => ingestEvent(evt, 'qq'));
     ai = new AIClassifier(config);
 
     registerIpc();
@@ -1552,6 +1588,15 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
       }
     }
 
+    // QQ 数据源（OneBot 11）独立于微信数据源：配置启用且允许自动连接时后台保持连接
+    const qqCfg = config().qq || {};
+    if (qqCfg.enabled && qqCfg.autoConnect !== false) {
+      const result = qqSource.connect();
+      if (result && !result.ok) bootLog(`qq connect skipped: ${result.error || ''}`);
+    } else {
+      qqStatus = { state: 'disabled', message: 'QQ 数据源未启用' };
+    }
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       else showWindow();
@@ -1573,6 +1618,7 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
     }
     stopControlServer();
     if (demo) demo.stop();
+    if (qqSource) qqSource.stop();
     if (source) source.stop();
     if (store) store.flushNow();
   });
