@@ -31,13 +31,13 @@ Electron 进程「注册不上」，但**原生 WinForms 进程可以**。所以
 
 ## 兜底：全局快捷键
 
-即使托盘图标由于任何原因不可见，`Ctrl+Alt+W`（Electron `globalShortcut`）也能随时把窗口找回来；
+即使托盘图标由于任何原因不可见，`Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）（Electron `globalShortcut`）也能随时把窗口找回来；
 再次运行 `WeNotice.exe` 也会唤醒已有窗口（单实例锁）。
 
 ## 用户自救
 
 1. 点任务栏右下角 `^`，把 WeNotice 图标从展开区拖到任务栏固定；
-2. 找不到图标时按 `Ctrl+Alt+W`；
+2. 找不到图标时按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）；
 3. 仍不行：设置 → 应用 → 关闭「最小化到托盘」，最小化就会回到任务栏；
 4. 反馈问题时可附上 `resources\.data\boot.log`（含托盘/控制接口是否创建成功）。
 
@@ -46,3 +46,4 @@ Electron 进程「注册不上」，但**原生 WinForms 进程可以**。所以
 - `tools/launcher.cs`：启动器源码（编译为 `dist\WeNotice\WeNotice.exe`）
 - `app/main.js`：`--launcher-tray` 模式、控制接口、全局快捷键
 - `tools/build-portable.ps1`：打包时编译启动器并复制进 dist
+

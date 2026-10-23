@@ -729,17 +729,23 @@ function startControlServer() {
   });
 }
 
-// 全局快捷键兜底：即使托盘图标没有显示，也能用 Ctrl+Alt+W 找回窗口。
-let hotkeyRegistered = false;
+// 全局快捷键兜底：即使托盘图标没有显示，也能一键找回窗口。
+// 注意：Ctrl+Alt+W 可能被其它软件占用（注册会返回 false），因此准备多个候选键依次尝试。
+const HOTKEY_CANDIDATES = ['Control+Alt+Shift+W', 'Control+Alt+F9', 'Control+Alt+Shift+N'];
+let hotkeyRegistered = '';
 
 function registerGlobalHotkey() {
-  try {
-    hotkeyRegistered = globalShortcut.register('Control+Alt+W', () => showWindow());
-  } catch (err) {
-    hotkeyRegistered = false;
-    bootLog(`global hotkey failed: ${err.message}`);
+  for (const acc of HOTKEY_CANDIDATES) {
+    try {
+      if (globalShortcut.register(acc, () => showWindow())) {
+        hotkeyRegistered = acc;
+        break;
+      }
+    } catch (err) {
+      bootLog(`global hotkey ${acc} failed: ${err.message}`);
+    }
   }
-  bootLog(`global hotkey Ctrl+Alt+W registered=${hotkeyRegistered}`);
+  bootLog(`global hotkey registered=${hotkeyRegistered || 'none'}`);
 }
 
 // ---------------------------------------------------------------------------
