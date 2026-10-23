@@ -55,4 +55,5 @@ if ($LASTEXITCODE -ne 0) { throw "签名失败，signtool 退出码 $LASTEXITCOD
 if ($LASTEXITCODE -ne 0) { throw "签名验证失败，signtool 退出码 $LASTEXITCODE" }
 
 $sig = Get-AuthenticodeSignature $target
-Write-Host ("签名完成：{0} 状态={1} 发布者={2}" -f $target, $sig.Status, $sig.SignerCertificate.Subject)
+Write-Host ("Signed: " + $target + " | status=" + $sig.Status + " | signer=" + $sig.SignerCertificate.Subject)
+
