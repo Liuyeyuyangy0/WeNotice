@@ -13,17 +13,25 @@ const AstrWechat = require('./lib/astr');
 const { evaluate, CATEGORIES, normalizeRule, RULE_TEMPLATES, normalizeText } = require('./lib/rules');
 const { humanizeContent } = require('./lib/content');
 
-// 启动诊断日志（仅当设置了 WENOTICE_BOOT_LOG 时生效，用于排查打包/启动问题）
-const BOOT_LOG = process.env.WENOTICE_BOOT_LOG || '';
+// 启动诊断日志：默认写入 userData/boot.log（便于用户反馈问题），可用 WENOTICE_BOOT_LOG 覆盖路径。
+// 注意：userData 在下面“运行环境”里可能被重定向，所以日志路径要延迟到重定向之后再解析。
+let BOOT_LOG = process.env.WENOTICE_BOOT_LOG || '';
+function resolveBootLog() {
+  if (!BOOT_LOG) BOOT_LOG = path.join(app.getPath('userData'), 'boot.log');
+  return BOOT_LOG;
+}
 function bootLog(message) {
-  if (!BOOT_LOG) return;
   try {
-    fs.appendFileSync(BOOT_LOG, `[${new Date().toISOString()}] ${message}\n`);
+    const file = resolveBootLog();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.existsSync(file) && fs.statSync(file).size > 512 * 1024) {
+      fs.writeFileSync(file, '');
+    }
+    fs.appendFileSync(file, `[${new Date().toISOString()}] ${message}\n`);
   } catch (_err) {
-    /* noop */
+    /* 无法写日志时静默（只读目录等） */
   }
 }
-bootLog(`bootstrap: packaged=${app.isPackaged} argv=${JSON.stringify(process.argv)}`);
 
 // ---------------------------------------------------------------------------
 // 运行环境
@@ -56,9 +64,15 @@ if (!app.isPackaged) {
 }
 app.setAppUserModelId('com.wenotice.filter');
 
+bootLog(
+  `bootstrap: packaged=${app.isPackaged} userData=${app.getPath('userData')} argv=${JSON.stringify(process.argv)}`
+);
+
 const ASSET_DIR = path.join(__dirname, 'assets');
 const APP_ICON = path.join(ASSET_DIR, 'icon.png');
-const TRAY_ICON = path.join(ASSET_DIR, 'tray.png');
+// Windows 托盘优先用多尺寸 ICO（16/24/32/48/64/128/256），高 DPI 下更稳；缺 ICO 时回退 PNG
+const TRAY_ICON_ICO = path.join(ASSET_DIR, 'tray.ico');
+const TRAY_ICON = fs.existsSync(TRAY_ICON_ICO) ? TRAY_ICON_ICO : path.join(ASSET_DIR, 'tray.png');
 
 // ---------------------------------------------------------------------------
 // 全局状态

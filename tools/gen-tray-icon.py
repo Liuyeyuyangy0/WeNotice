@@ -44,4 +44,9 @@ os.makedirs(base, exist_ok=True)
 draw(64).save(os.path.join(base, "tray.png"))
 draw(64).save(os.path.join(base, "tray-64.png"))
 draw(32).save(os.path.join(base, "tray-32.png"))
+# Windows 托盘/标题栏优先使用多尺寸 ICO，兼容高 DPI（125%/150%/200%）与不同缩放
+draw(256).save(
+    os.path.join(base, "tray.ico"),
+    sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+)
 print("tray icons regenerated")

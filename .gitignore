@@ -1,6 +1,7 @@
 # 打包产物 / 运行时（自行生成，不入库）
 dist/
 tools/electron-dist/
+tools/electron-*/
 tools/electron-v*-win32-x64.zip
 tools/electron.zip
 tools/WeNoticeLauncher.exe
