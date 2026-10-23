@@ -256,7 +256,41 @@ node build\test-rules.js   # 参考 test-rules.js 的写法
 
 ---
 
-## 11. 许可
+## 11. 代码签名（可选）
+
+未签名 exe **在本机运行一般不会弹 SmartScreen**（SmartScreen 主要针对从网络下载、带 Mark-of-the-Web 标记的文件）。签名有两种用途：
+
+- **本地自用**：自签名证书只在本机（导入了根证书的机器）显示发布者名，**不改变 SmartScreen 行为**。自签名 = 对 SmartScreen 而言等同于未签名。
+- **对外分发**：需要受信任的代码签名证书（商业 OV/EV、[SignPath 开源赞助](https://signpath.org/)、Azure 工件签名）。新证书首发仍可能弹 SmartScreen，需靠下载量积累信誉；**EV 已不再豁免 SmartScreen**（见[微软文档](https://learn.microsoft.com/zh-cn/windows/apps/package-and-deploy/smartscreen-reputation)）。
+
+自签名示例（Windows SDK 自带 signtool）：
+
+```powershell
+# 1) 创建自签名证书（5 年，存到 CurrentUser\My）
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=WeNotice" `
+  -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
+  -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(5)
+
+# 2) 导入到「受信任的根证书颁发机构」和「受信任的发布者」（本机信任，仅测试用）
+foreach ($n in 'Root','TrustedPublisher') {
+  $s = New-Object System.Security.Cryptography.X509Certificates.X509Store($n,'CurrentUser')
+  $s.Open('ReadWrite'); $s.Add($cert); $s.Close()
+}
+
+# 3) 用脚本签名并验证（证书库里按 Subject 查找）
+powershell -ExecutionPolicy Bypass -File tools\sign-exe.ps1 -File dist\WeNotice\WeNotice.exe
+
+# 或用 .pfx 文件（正式流程）
+powershell -ExecutionPolicy Bypass -File tools\sign-exe.ps1 -File dist\WeNotice\WeNotice.exe `
+  -Pfx C:\path\cert.pfx -PfxPassword 你的密码
+```
+
+> 注意：网上教程里 `signtool sign ... /p <密码>` 的尖括号只是占位符，直接在 PowerShell 里输入会报
+> `"<"运算符是为将来使用而保留的`；请替换成真实密码，或直接用本仓库的 `tools\sign-exe.ps1` 参数传入。
+
+---
+
+## 12. 许可
 
 - **WeNotice 本项目：MIT License**（见 [LICENSE](LICENSE)），可自由使用、修改、分发（保留版权声明）。
 - 第三方依赖：
