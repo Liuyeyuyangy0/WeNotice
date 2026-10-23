@@ -1,4 +1,4 @@
-﻿# WeNotice 便携版打包脚本
+# WeNotice 便携版打包脚本
 # 用法：powershell -ExecutionPolicy Bypass -File tools\build-portable.ps1 [-Version 1.0.0]
 # 产物：dist\WeNotice\WeNotice.exe（启动器）+ electron.exe（运行时，保持原名）
 #
@@ -26,7 +26,7 @@ if (-not (Test-Path $appDir)) { throw "缺少应用源码：$appDir" }
 
 Write-Host "[1/6] 编译启动器…"
 if (-not (Test-Path $csc)) { throw "缺少 C# 编译器：$csc（Windows 自带 .NET Framework 4.x 应包含）" }
-& $csc /nologo /target:winexe /win32icon:$iconFile /out:$launcherExe /r:System.dll $launcherSrc
+& $csc /nologo /target:winexe /win32icon:$iconFile /out:$launcherExe /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll $launcherSrc
 if ($LASTEXITCODE -ne 0) { throw "启动器编译失败（exit=$LASTEXITCODE）" }
 
 Write-Host "[2/6] 清理旧产物…"

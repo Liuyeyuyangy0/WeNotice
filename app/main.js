@@ -1,9 +1,10 @@
 'use strict';
 
-const { app, BrowserWindow, Notification, Tray, Menu, ipcMain, dialog, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, Notification, Tray, Menu, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const http = require('http');
 
 const { Store } = require('./lib/store');
 const { WeFlowSource } = require('./lib/source');
@@ -52,6 +53,10 @@ const SHOT_CLICK = getArg('click', '');
 const SHOT_JS = getArg('shot-js', '');
 const OPEN_PAGE = getArg('page', '');
 const IS_SHOT = Boolean(SHOT_PATH);
+// 启动器托盘模式：托盘图标由 WeNotice.exe（C# 启动器）负责显示，应用通过本地控制接口配合。
+// 背景：本机/部分 Windows 环境下 Electron 的 Tray 注册后系统不显示图标（见 docs/TRAY.md），
+// 而原生 WinForms 托盘正常，因此把托盘交给启动器更可靠。
+const LAUNCHER_TRAY = hasFlag('launcher-tray');
 
 if (!app.isPackaged) {
   const devData = process.env.WENOTICE_DATA_DIR || path.join(__dirname, '..', '.data');
@@ -618,6 +623,126 @@ function showTrayHint() {
 }
 
 // ---------------------------------------------------------------------------
+// 启动器托盘模式（--launcher-tray）
+//
+// WeNotice.exe 启动器负责显示托盘图标（WinForms NotifyIcon，本机验证可靠），
+// 应用在 127.0.0.1 随机端口开一个带 token 的本地控制接口，启动器通过它：
+//   show      → 显示主窗口
+//   settings  → 显示主窗口并打开设置
+//   pause     → 切换暂停提醒
+//   state     → 读取未读数/连接状态（更新托盘提示）
+//   quit      → 退出应用
+// 端口与 token 写入 <userData>/control.json，启动器启动后轮询读取。
+// ---------------------------------------------------------------------------
+
+let controlServer = null;
+
+function controlFilePath() {
+  return path.join(app.getPath('userData'), 'control.json');
+}
+
+function stopControlServer() {
+  if (!controlServer) return;
+  try {
+    controlServer.close();
+  } catch (_err) {
+    /* noop */
+  }
+  controlServer = null;
+  try {
+    fs.unlinkSync(controlFilePath());
+  } catch (_err) {
+    /* noop */
+  }
+}
+
+function startControlServer() {
+  stopControlServer();
+  const token = crypto.randomBytes(16).toString('hex');
+  controlServer = http.createServer((req, res) => {
+    const reply = (code, body) => {
+      try {
+        res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(body));
+      } catch (_err) {
+        /* noop */
+      }
+    };
+    let url;
+    try {
+      url = new URL(req.url, 'http://127.0.0.1');
+    } catch (_err) {
+      reply(400, { ok: false });
+      return;
+    }
+    if (url.searchParams.get('token') !== token) {
+      reply(403, { ok: false, error: 'forbidden' });
+      return;
+    }
+    const action = url.pathname.replace(/^\/+/, '');
+    const stats = getStats();
+    switch (action) {
+      case 'show':
+        showWindow();
+        reply(200, { ok: true });
+        return;
+      case 'settings':
+        openSettings();
+        reply(200, { ok: true });
+        return;
+      case 'pause': {
+        const want = url.searchParams.get('value');
+        paused = want === null ? !paused : want === '1' || want === 'true';
+        broadcastState();
+        scheduleTrayRefresh();
+        reply(200, { ok: true, paused });
+        return;
+      }
+      case 'state':
+        reply(200, {
+          ok: true,
+          unread: stats.unread,
+          paused,
+          demo: demoActive,
+          sourceState: source ? source.status.state : 'idle',
+          sourceMessage: source ? source.status.message || '' : ''
+        });
+        return;
+      case 'quit':
+        isQuitting = true;
+        reply(200, { ok: true });
+        setTimeout(() => app.quit(), 50);
+        return;
+      default:
+        reply(404, { ok: false });
+    }
+  });
+  controlServer.on('error', (err) => bootLog(`control server error: ${err.message}`));
+  controlServer.listen(0, '127.0.0.1', () => {
+    const addr = controlServer.address();
+    try {
+      fs.writeFileSync(controlFilePath(), JSON.stringify({ port: addr.port, token }), 'utf8');
+      bootLog(`control server on 127.0.0.1:${addr.port}`);
+    } catch (err) {
+      bootLog(`control server write failed: ${err.message}`);
+    }
+  });
+}
+
+// 全局快捷键兜底：即使托盘图标没有显示，也能用 Ctrl+Alt+W 找回窗口。
+let hotkeyRegistered = false;
+
+function registerGlobalHotkey() {
+  try {
+    hotkeyRegistered = globalShortcut.register('Control+Alt+W', () => showWindow());
+  } catch (err) {
+    hotkeyRegistered = false;
+    bootLog(`global hotkey failed: ${err.message}`);
+  }
+  bootLog(`global hotkey Ctrl+Alt+W registered=${hotkeyRegistered}`);
+}
+
+// ---------------------------------------------------------------------------
 // 窗口
 // ---------------------------------------------------------------------------
 
@@ -982,7 +1107,11 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
     registerIpc();
     createWindow();
     bootLog('window created');
-    if (!IS_SHOT) createTray();
+    if (!IS_SHOT) {
+      if (LAUNCHER_TRAY) startControlServer();
+      else createTray();
+      registerGlobalHotkey();
+    }
     applyAutoLaunch();
 
     const cfg = config().source || {};
@@ -1008,6 +1137,12 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    try {
+      if (hotkeyRegistered) globalShortcut.unregisterAll();
+    } catch (_err) {
+      /* noop */
+    }
+    stopControlServer();
     if (demo) demo.stop();
     if (source) source.stop();
     if (store) store.flushNow();
