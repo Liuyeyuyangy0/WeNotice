@@ -1,0 +1,10 @@
+{
+  "name": "wenotice",
+  "productName": "WeNotice",
+  "version": "1.0.0",
+  "description": "WeNotice - 微信通知过滤器：从 AstrWeChat / WeFlow 本地 API 接收微信消息，按规则筛选出真正的通知类消息并提醒。",
+  "main": "main.js",
+  "private": true,
+  "license": "MIT",
+  "author": "WeNotice"
+}

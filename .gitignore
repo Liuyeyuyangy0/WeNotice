@@ -1,0 +1,33 @@
+# 打包产物 / 运行时（自行生成，不入库）
+dist/
+tools/electron-dist/
+tools/electron-v*-win32-x64.zip
+tools/electron.zip
+tools/WeNoticeLauncher.exe
+
+# 本地测试、截图、临时数据
+build/
+.data/
+resources/.data/
+*.log
+dbg-*.txt
+launch-*.txt
+pkg-*.txt
+tray-*.txt
+mini*-*.txt
+tiny-*.txt
+launcher-*.txt
+WeNotice-launch-error.txt
+
+# 证书 / 密钥（永远不要提交）
+*.pfx
+*.p12
+*.key
+*.pem
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+node_modules/

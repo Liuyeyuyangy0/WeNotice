@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; font-src 'self'">
+  <title>WeNotice · 微信通知过滤器</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 1 0-12 0c0 5-2 6.1-2 7.6h16c0-1.5-2-2.6-2-7.6Z"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5" width="3.4" height="14" rx="1.2"/><rect x="13.6" y="5" width="3.4" height="14" rx="1.2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5c0-.8.9-1.3 1.6-.9l9 6.5c.6.4.6 1.4 0 1.8l-9 6.5c-.7.4-1.6-.1-1.6-.9Z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13h4l1.6 2.6h4.8L16 13h4"/><path d="M5.4 5h13.2L21 13v4.2A1.8 1.8 0 0 1 19.2 19H4.8A1.8 1.8 0 0 1 3 17.2V13Z"/></symbol>
+    <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5.2a2.8 2.8 0 0 0 5.6 0V12a9.6 9.6 0 1 0-3.8 7.7"/></symbol>
+    <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M4 10v4a2 2 0 0 0 2 2h1l9 4V4L7 8H6a2 2 0 0 0-2 2Z"/><path d="M19 9a4 4 0 0 1 0 6M7 16l1 4h2.5l-1.2-4"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18a1 1 0 0 1 1 1v2"/><path d="M4 7.5V18a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/><path d="M20 10h-4.5a2.5 2.5 0 0 0 0 5H20Z"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="m12 3 8 4.2v9.6L12 21l-8-4.2V7.2Z"/><path d="m4 7.2 8 4.3 8-4.3M12 11.5V21"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 7.8 7 9.5 4-1.7 7-5.1 7-9.5V6Z"/><path d="m9 12 2.2 2.2L15.5 9.8"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="7.5" width="18" height="12.5" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5M3 12.5h18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M13.5 3H7a1.6 1.6 0 0 0-1.6 1.6v14.8A1.6 1.6 0 0 0 7 21h10a1.6 1.6 0 0 0 1.6-1.6V8Z"/><path d="M13.5 3v5h5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.3-1.3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.6c0 4-3.6 7.2-8 7.2a9 9 0 0 1-2.3-.3L5 20l.9-3.2A6.9 6.9 0 0 1 4 11.6C4 7.6 7.6 4.4 12 4.4s8 3.2 8 7.2Z"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9Z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.6 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9Z"/></symbol>
+    <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.3A9.8 9.8 0 0 1 12 6.2c5 0 9 5.8 9 5.8a17 17 0 0 1-3.2 3.7M6.7 6.8A16.7 16.7 0 0 0 3 12s4 5.8 9 5.8a9.6 9.6 0 0 0 4.2-1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 4.8-9 4.8-9-4.8Z"/><path d="m3 12.3 9 4.8 9-4.8M3 16.5l9 4.8 9-4.8"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.4"/><path d="M20 5v6h-6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7M6.5 7l.9 12.2A1.8 1.8 0 0 0 9.2 21h5.6a1.8 1.8 0 0 0 1.8-1.8L17.5 7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a15 15 0 0 1 19 0M5.5 12a10.5 10.5 0 0 1 13 0M8.5 15.5a6 6 0 0 1 7 0M12 19h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 21.5 20h-19Z"/><path d="M12 10v4.5M12 17.6h.01"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 3 5 13.5h5.5L11 21l8-10.5h-5.5Z"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3.5"/></symbol>
+  </svg>
+
+  <div class="app">
+    <header class="titlebar">
+      <div class="brand">
+        <img class="brand-mark" src="../assets/icon.png" alt="WeNotice">
+        <div class="brand-text">
+          <span class="brand-name">WeNotice</span>
+          <span class="brand-sub">微信通知过滤器</span>
+        </div>
+      </div>
+
+      <div class="titlebar-center">
+        <label class="search" id="searchWrap">
+          <svg class="ic"><use href="#i-search"/></svg>
+          <input id="searchInput" type="text" placeholder="搜索消息内容、发送者或群名" autocomplete="off" spellcheck="false">
+          <kbd class="search-kbd">Ctrl K</kbd>
+        </label>
+      </div>
+
+      <div class="titlebar-actions">
+        <button class="conn-pill is-idle" id="connPill" type="button" title="数据源状态，点击处理">
+          <span class="conn-dot"></span>
+          <span class="conn-text">未连接</span>
+        </button>
+        <button class="icon-btn" id="btnPause" type="button" title="暂停提醒">
+          <svg class="ic"><use href="#i-pause"/></svg>
+        </button>
+        <button class="ghost-btn" id="btnRules" type="button" title="通知规则">
+          <svg class="ic"><use href="#i-sliders"/></svg><span>规则</span>
+        </button>
+        <button class="icon-btn" id="btnSettings" type="button" title="设置">
+          <svg class="ic"><use href="#i-gear"/></svg>
+        </button>
+        <div class="win-controls">
+          <button class="win-btn" id="winMin" type="button" title="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
+          <button class="win-btn" id="winMax" type="button" title="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
+          <button class="win-btn win-close" id="winClose" type="button" title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-scroll">
+        <nav class="nav-group">
+          <button class="nav-item is-active" data-view="inbox" type="button">
+            <svg class="ic"><use href="#i-inbox"/></svg><span>通知中心</span><span class="nav-badge" id="badgeInbox">0</span>
+          </button>
+          <button class="nav-item" data-view="unread" type="button">
+            <svg class="ic"><use href="#i-bell"/></svg><span>未读通知</span><span class="nav-badge accent" id="badgeUnread">0</span>
+          </button>
+          <button class="nav-item" data-view="starred" type="button">
+            <svg class="ic"><use href="#i-star"/></svg><span>已收藏</span><span class="nav-badge" id="badgeStarred">0</span>
+          </button>
+          <button class="nav-item" data-view="ignored" type="button">
+            <svg class="ic"><use href="#i-eyeoff"/></svg><span>已忽略</span><span class="nav-badge" id="badgeIgnored">0</span>
+          </button>
+        </nav>
+
+        <div class="section-label">通知分类</div>
+        <nav class="nav-group nav-categories" id="catNav"></nav>
+
+        <div class="section-label">全部</div>
+        <nav class="nav-group">
+          <button class="nav-item" data-view="all" type="button">
+            <svg class="ic"><use href="#i-layers"/></svg><span>全部消息</span><span class="nav-badge" id="badgeAll">0</span>
+          </button>
+        </nav>
+        </div>
+
+        <div class="sidebar-foot">
+          <div class="source-card" id="sourceCard">
+            <div class="source-head">
+              <span class="source-dot" id="sourceDot"></span>
+              <div class="source-titles">
+                <span class="source-name">AstrWeChat 数据源</span>
+                <span class="source-state" id="sourceState">未配置</span>
+              </div>
+            </div>
+            <div class="source-actions">
+              <button class="mini-btn" id="btnTest" type="button">测试连接</button>
+              <button class="mini-btn" id="btnDemo" type="button">演示模式</button>
+            </div>
+          </div>
+          <div class="sidebar-stats" id="sidebarStats"></div>
+        </div>
+      </aside>
+
+      <main class="feed">
+        <div class="feed-head">
+          <div class="feed-title-wrap">
+            <h2 class="feed-title" id="viewTitle">通知中心</h2>
+            <span class="feed-count" id="viewCount">0 条</span>
+          </div>
+          <div class="feed-tools">
+            <div class="segmented" id="sortSwitch">
+              <button class="seg-btn is-on" data-sort="time" type="button">最新</button>
+              <button class="seg-btn" data-sort="importance" type="button">重要优先</button>
+            </div>
+            <button class="text-btn" id="btnMarkAll" type="button">全部已读</button>
+            <button class="text-btn" id="btnExport" type="button">导出</button>
+          </div>
+        </div>
+
+        <div class="demo-banner" id="demoBanner" hidden>
+          <svg class="ic"><use href="#i-zap"/></svg>
+          <span>演示模式：当前展示样例消息，不会读取你的微信数据。</span>
+          <button class="banner-btn" id="btnDemoBanner" type="button">退出演示</button>
+        </div>
+
+        <div class="message-list" id="messageList"></div>
+        <div class="empty" id="emptyState" hidden></div>
+      </main>
+
+      <aside class="detail" id="detailPanel">
+        <div class="detail-placeholder" id="detailPlaceholder">
+          <div class="placeholder-icon"><svg class="ic"><use href="#i-bell"/></svg></div>
+          <p class="placeholder-title">选择一条通知查看详情</p>
+          <p class="placeholder-text">这里会显示消息全文、命中原因、分类与来源信息。</p>
+          <div class="shortcut-list">
+            <span><kbd>Ctrl</kbd><kbd>K</kbd> 搜索</span>
+            <span><kbd>Esc</kbd> 关闭弹窗</span>
+          </div>
+        </div>
+        <div class="detail-body" id="detailBody" hidden></div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <div class="status-left">
+        <span class="status-item"><span class="status-dot" id="statusDot"></span><span id="statusSource">数据源：未连接</span></span>
+        <span class="status-item status-muted" id="statusHint"></span>
+      </div>
+      <div class="status-right">
+        <span class="status-item" id="statusStats">今日 0 条通知</span>
+        <span class="status-item status-muted" id="statusVersion">v1.0.0</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="modal-root" id="modalRoot" hidden></div>
+  <div class="toast-host" id="toastHost"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
