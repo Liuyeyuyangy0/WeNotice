@@ -95,7 +95,9 @@ dist\WeNotice\WeNotice.exe
 > `%LOCALAPPDATA%\Programs\WeNotice` 或 `C:\Users\<用户名>\WeNotice`。
 > 放在 AI 代理工作区、同步盘、受控企业目录等「受限目录」里运行时，Windows 会拒绝对该进程的托盘注册
 > （`Shell_NotifyIcon` 返回 ACCESS_DENIED），表现为**托盘没有图标**——这是环境限制，不是应用缺陷。
+> v1.1.1 起启动器会**在创建托盘前先探测**：受限目录下会立刻弹窗提示原因并给出迁移方法，不再静默丢图标。
 > 本机已验证：同一份程序放在代理工作区内托盘不显示，移到 `C:\Users\<用户名>\WeNotice` 后图标正常。
+> 另外，v1.1.1 起重复双击启动会提示「WeNotice 已经在运行」，而不是静默退出——按 `Ctrl+Alt+Shift+W` 即可找回窗口。
 
 ![便携版启动](docs/screenshots/packaged.png)
 

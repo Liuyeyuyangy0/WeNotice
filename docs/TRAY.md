@@ -56,3 +56,15 @@ Electron 的 `new Tray()` 也不会报错到 JS 层，所以表现为「代码�
 - `tools/launcher.cs`：启动器源码（编译为 `dist\WeNotice\WeNotice.exe`）
 - `app/main.js`：`--launcher-tray` 模式、控制接口、全局快捷键、最小化处理
 - `tools/build-portable.ps1`：打包时编译启动器并复制进 dist
+
+## v1.1.1：启动前预检（新增）
+
+启动器在创建托盘图标**之前**，会先自己调用一次 `Shell_NotifyIcon(NIM_ADD)` 探测当前目录是否允许注册托盘：
+
+- 探测失败（典型：`Win32 错误码 5 = ACCESS_DENIED`，说明目录被系统限制）→ 立刻弹窗说明原因、给出迁移路径，应用照常运行，仍可用 `Ctrl+Alt+Shift+W` 找回窗口；
+- 探测成功 → 删除探测图标，再创建真正的托盘图标；
+- 日志 `WeNotice-launcher.log` 会记录 `tray registration probe FAILED: ...` 或后续 `tray created: visible=True`。
+
+另外，重复双击 `WeNotice.exe` 时会提示「WeNotice 已经在运行」，不会再静默退出。
+
+> 排查小技巧：在本工具/自动化环境里用 `Start-Process WeNotice.exe` 启动 GUI 可能挂住（启动器弹窗会阻塞等待输入），请改用 `cmd /c start "" WeNotice.exe`。

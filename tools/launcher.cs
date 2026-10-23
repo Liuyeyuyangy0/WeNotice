@@ -18,6 +18,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -33,6 +34,7 @@ internal static class Program
     private static string apiBase;
     private static string apiToken;
     private static bool quitting;
+    private static Mutex instanceMutex;
 
     [STAThread]
     private static void Main(string[] args)
@@ -47,6 +49,21 @@ internal static class Program
         if (!File.Exists(target))
         {
             Fail("未找到 electron.exe，请确认 WeNotice 目录完整（electron.exe 与 resources 目录需在同一文件夹）。");
+            return;
+        }
+
+        // 同一台机器同时只允许一个 WeNotice 托盘宿主：避免从不同目录各启动一份，
+        // 出现「通知数据分裂 / 这一份没有托盘」的混乱（多份实例的托盘图标容易互相覆盖）。
+        bool createdNew;
+        instanceMutex = new Mutex(true, "Local\\WeNotice.TrayHost.SingleInstance", out createdNew);
+        if (!createdNew)
+        {
+            Log("another instance already running (mutex)");
+            MessageBox.Show(
+                "WeNotice 已经在运行了。\n\n如果看不到窗口：请按 Ctrl+Alt+Shift+W 找回，或单击任务栏右下角「^」里的 WeNotice 托盘图标。",
+                "WeNotice",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
             return;
         }
 
@@ -150,10 +167,111 @@ internal static class Program
 
     // ---------------- 托盘 ----------------
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NOTIFYICONDATAW
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public int uID;
+        public int uFlags;
+        public int uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+        public int dwState;
+        public int dwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+        public int uVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+        public int dwInfoFlags;
+        public Guid guidItem;
+        public IntPtr hBalloonIcon;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool Shell_NotifyIconW(int dwMessage, ref NOTIFYICONDATAW lpData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr iconName);
+
+    private const int NIM_ADD = 0;
+    private const int NIM_DELETE = 2;
+    private const int NIF_MESSAGE = 0x1;
+    private const int NIF_ICON = 0x2;
+    private const int NIF_TIP = 0x4;
+
+    /**
+     * 提前探测「当前目录下能否注册托盘图标」。
+     * 受限目录（AI 代理工作区、同步盘、受控企业目录等）会被 Windows 直接拒绝
+     * Shell_NotifyIcon(NIM_ADD)，而 WinForms NotifyIcon 只会静默失败、不抛异常。
+     */
+    private static bool ProbeTrayRegistration(out string error)
+    {
+        error = null;
+        try
+        {
+            using (var form = new Form())
+            {
+                IntPtr hwnd = form.Handle;
+                var data = new NOTIFYICONDATAW();
+                data.cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATAW));
+                data.hWnd = hwnd;
+                data.uID = 0x7FFE;
+                data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+                data.uCallbackMessage = 0x8001;
+                data.hIcon = LoadIcon(IntPtr.Zero, new IntPtr(32512)); // IDI_APPLICATION
+                data.szTip = "WeNotice tray probe";
+                bool added = Shell_NotifyIconW(NIM_ADD, ref data);
+                int err = Marshal.GetLastWin32Error();
+                if (added)
+                {
+                    Shell_NotifyIconW(NIM_DELETE, ref data);
+                    return true;
+                }
+                error = "Shell_NotifyIcon(NIM_ADD) 返回 False，Win32 错误码 " + err
+                    + (err == 5 ? "（ACCESS_DENIED：当前程序所在目录被系统限制）" : string.Empty);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static void WarnTrayBlocked(string probeError)
+    {
+        Log("tray registration probe FAILED: " + probeError);
+        try
+        {
+            MessageBox.Show(
+                "Windows 拒绝了 WeNotice 的托盘图标注册，所以「^」里看不到图标。\n\n"
+                + "原因：当前程序位于受限目录（常见于 AI 代理工作区、同步盘、受控企业目录）。\n"
+                + "当前目录：\n" + appDir + "\n\n"
+                + "解决办法：把整个 WeNotice 文件夹移动到普通用户目录，例如：\n"
+                + "C:\\Users\\<你的用户名>\\WeNotice\n"
+                + "然后从新目录重新打开。\n\n"
+                + "程序仍会继续运行：可按 Ctrl+Alt+Shift+W 找回窗口，或从任务栏直接点开窗口。",
+                "WeNotice · 托盘图标被系统拒绝",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        catch (Exception)
+        {
+            /* 无交互桌面时忽略弹窗 */
+        }
+    }
+
     private static void CreateTray()
     {
         try
         {
+            string probeError;
+            if (!ProbeTrayRegistration(out probeError))
+            {
+                WarnTrayBlocked(probeError);
+            }
+
             Icon icon;
             try
             {
