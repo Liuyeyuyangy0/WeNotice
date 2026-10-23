@@ -60,7 +60,7 @@ jobs:
 
       - name: Build portable package (unsigned)
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File tools/build-portable.ps1 -Version '${{ steps.ver.outputs.version }}'
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools/build-portable.ps1 -Version '${{ steps.ver.outputs.version }}'
 
       # ---- 可选：SignPath 开源签名（给启动器 WeNotice.exe 签名） -----------------
       - name: Upload launcher for signing

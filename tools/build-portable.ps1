@@ -1,4 +1,4 @@
-# WeNotice 便携版打包脚本
+﻿# WeNotice 便携版打包脚本
 # 用法：powershell -ExecutionPolicy Bypass -File tools\build-portable.ps1 [-Version 1.0.0]
 # 产物：dist\WeNotice\WeNotice.exe（启动器）+ electron.exe（运行时，保持原名）
 #
