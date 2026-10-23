@@ -181,7 +181,7 @@ function openOnboardingModal() {
         <ol class="onboarding-steps">
           <li><b>体验演示</b>：先看看通知中心长什么样（只读演示样例，不碰真实数据）。</li>
           <li><b>连接 AstrWeChat</b>：退出微信登录 → AstrWeChat「微信连接」里点「自动检测 / 自动获取」→ 重新登录微信 → 点「连接数据库」。</li>
-          <li><b>开启 API</b>：AstrWeChat「设置」里打开「API 服务」和「主动推送」；Token 不用复制，WeNotice 设置里点「自动读取」即可。</li>
+          <li><b>开启 API</b>：AstrWeChat 没有独立的「设置 → API」页，开关在左侧 <b>「Bridge」页</b>的「启动 AstrWeChat / 保存并启动」（会一并开启 API 服务与主动推送）。也可以直接回 WeNotice 设置 → 数据源 点「一键开启 AstrWeChat API」；Token 不用复制，会自动读取。</li>
         </ol>
         <div class="onboarding-note">不确定卡在哪一步？点「测试连接」会告诉你是哪一环没完成；也可以 设置 → 应用 → 导出诊断信息 再发给我们。</div>
         <div class="test-result" id="onboardingResult" hidden></div>
@@ -1089,15 +1089,21 @@ function settingsBody() {
     <div class="field">
       <label>API 地址</label>
       <input class="input" id="setBaseUrl" value="${escapeHtml(source.baseUrl || 'http://127.0.0.1:5031')}" placeholder="http://127.0.0.1:5031">
-      <div class="hint">默认 <b>127.0.0.1:5031</b>。需先在 AstrWeChat 中完成微信数据库连接，并开启「API 服务」与「主动推送」。</div>
+      <div class="hint">默认 <b>127.0.0.1:5031</b>。需先在 AstrWeChat 完成微信连接；API 服务开关在 AstrWeChat 的 <b>「Bridge」页</b>（没有独立的「设置 → API」页），也可以直接点下面的「一键开启」。</div>
     </div>
     <div class="field">
       <label>Access Token</label>
       <div style="display:flex;gap:8px">
-        <input class="input" id="setToken" type="password" value="${escapeHtml(source.token || '')}" placeholder="从 AstrWeChat 设置中复制" style="flex:1">
+        <input class="input" id="setToken" type="password" value="${escapeHtml(source.token || '')}" placeholder="点「一键开启」或「自动读取」，无需手动复制" style="flex:1">
         <button class="btn btn-sm" id="setReadToken" type="button">自动读取</button>
       </div>
-      <div class="hint">Token 用于访问本地 API，仅保存在本机配置文件中。点「自动读取」可直接从 AstrWeChat 的配置文件取，不用手动复制。</div>
+      <div class="hint">Token 用于访问本地 API，仅保存在本机配置文件中；「一键开启」「自动读取」都会直接从 AstrWeChat 的配置文件取值，不用手动复制。</div>
+    </div>
+    <div class="field">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-sm" id="setEnableAstrApi" type="button">一键开启 AstrWeChat API</button>
+        <span class="hint" style="margin:0">自动写入 AstrWeChat 配置（开启 API 服务 + 主动推送）并重启它，然后自动读取 Token；AstrWeChat 需要已完成微信连接。</span>
+      </div>
     </div>
     <div class="setting-row">
       <div class="setting-text"><div class="setting-title">自动读取 Token</div><div class="setting-desc">每次连接前自动从 AstrWeChat 配置读取 Token（AstrWeChat 重启后 Token 变化也能自动跟上）</div></div>
@@ -1265,16 +1271,69 @@ function openSettingsModal() {
   });
 
   $('#setReadToken').addEventListener('click', async () => {
+    const readTokenReason = (info) => {
+      const reason = (info && (info.tokenReason || (info.probe && info.probe.reason))) || '';
+      const map = {
+        'decrypt-failed': 'AstrWeChat 把 Token 加密保存了，但本机解不开（可能是 AstrWeChat 改了加密方式或使用了口令模式）。请打开 AstrWeChat → Bridge 页 → 启动 AstrWeChat，然后重新读取；或手动复制 Token。',
+        'password-mode': 'AstrWeChat 的 Token 使用了口令（密码）模式加密，WeNotice 无法自动解密。请打开 AstrWeChat → Bridge 页 → 启动 AstrWeChat，或手动复制 Token。',
+        unavailable: '当前系统加密服务不可用，无法解密 AstrWeChat 保存的 Token，请手动复制。',
+        'invalid-token': '已读取 Token，但 AstrWeChat 返回 401（Token 无效）。请到 AstrWeChat → Bridge 页重新「启动 AstrWeChat」生成新 Token，再读取。',
+        'not-connected': 'Token 有效，但 AstrWeChat 还没完成微信连接（请先在 AstrWeChat →「微信连接」完成连接数据库）。',
+        network: 'Token 已读取，但本地 API 不可达：请确认 AstrWeChat 正在运行，且已开启本地 API 服务。',
+        'no-config': '没有找到 AstrWeChat 配置文件，请先安装并打开一次 AstrWeChat。',
+        'no-token': 'AstrWeChat 配置里没有 Token：请打开 AstrWeChat → Bridge 页 → 启动 AstrWeChat 生成 Token。'
+      };
+      return map[reason] || '';
+    };
     try {
       const result = await window.we.readAstrToken();
       if (result && result.ok && result.token) {
         $('#setToken').value = result.token;
-        toast(`已从 AstrWeChat 读取 Token（${result.apiEnabled ? 'API 已启用' : '注意：AstrWeChat 的 API 服务还没开启'}）`, 'ok', 3200);
+        const probe = result.probe;
+        if (!probe) {
+          toast('已读取 Token，但未能验证（本地 API 不可达），请确认 AstrWeChat 正在运行。', 'ok', 5200);
+        } else if (probe.ok) {
+          toast(`已读取 Token 并验证有效（${result.tokenEncrypted ? '已自动解密' : '明文'}）`, 'ok', 4200);
+        } else {
+          const extra = readTokenReason({ tokenReason: probe.reason });
+          toast(extra || `Token 已读取，但校验失败：${probe.error || probe.reason}`, 'err', 6500);
+        }
       } else {
-        toast((result && result.error) || '没有在 AstrWeChat 配置里找到 Token，请先在 AstrWeChat 开启 API 服务', 'err', 4200);
+        const extra = readTokenReason(result);
+        toast(extra || (result && result.error) || '没有在 AstrWeChat 配置里找到可用 Token，请先在 AstrWeChat 开启 API 服务并复制 Token', 'err', 6500);
       }
     } catch (err) {
       toast(`读取失败：${err.message}`, 'err');
+    }
+  });
+
+  $('#setEnableAstrApi').addEventListener('click', async () => {
+    const ok = await confirmModal(
+      '这会修改 AstrWeChat 的配置（开启本地 API 服务 + 主动推送），并重启 AstrWeChat 使它生效。\n\nAstrWeChat 重启期间微信数据连接会短暂中断（几秒到几十秒），完成后自动恢复。继续吗？',
+      { okText: '开启并重启', danger: false }
+    );
+    if (!ok) return;
+    const btn = $('#setEnableAstrApi');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = '正在开启…';
+    toast('正在开启 AstrWeChat API，请稍候（最多约 50 秒）…', 'ok', 4000);
+    try {
+      const result = await window.we.enableAstrApi();
+      if (result && result.ok) {
+        if (result.token && $('#setToken')) $('#setToken').value = result.token;
+        toast(result.already ? 'AstrWeChat API 已经是开启状态，Token 已同步' : 'AstrWeChat API 已开启，Token 已同步，正在重新连接…', 'ok', 5000);
+        if (result.warning) toast(result.warning, 'err', 5000);
+        await window.we.reconnect();
+      } else {
+        const detail = result && result.log && result.log.length ? `（${result.log[result.log.length - 1]}）` : '';
+        toast(`${(result && result.error) || '开启失败'}${detail}`, 'err', 7000);
+      }
+    } catch (err) {
+      toast(`开启失败：${err.message}`, 'err', 6000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
     }
   });
 
@@ -1685,3 +1744,4 @@ function collectRuleEditor(rule) {
   rule.sessions = split(get('#reSessions').value);
   rule.enabled = readSwitch(get('#reEnabled'));
 }
+

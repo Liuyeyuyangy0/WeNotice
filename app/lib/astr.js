@@ -164,6 +164,34 @@ async function isRunning() {
   return /AstrWeChat\.exe/i.test(task.stdout);
 }
 
+/**
+ * 停止 AstrWeChat：先温和结束（taskkill 不带 /F），最多等 3.5 秒；仍在则强制结束。
+ * 返回 { ok, forced, error }。停止前请确认已提示用户（会断开微信连接）。
+ */
+async function stopAstrWechat() {
+  if (!(await isRunning())) return { ok: true, alreadyStopped: true };
+  try {
+    await execFileAsync('taskkill.exe', ['/IM', 'AstrWeChat.exe', '/T'], 8000);
+  } catch (_err) {
+    /* 进程可能已退出，继续轮询 */
+  }
+  for (let i = 0; i < 7; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (!(await isRunning())) return { ok: true, alreadyStopped: false };
+  }
+  try {
+    await execFileAsync('taskkill.exe', ['/IM', 'AstrWeChat.exe', '/T', '/F'], 8000);
+  } catch (_err) {
+    /* 继续轮询 */
+  }
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (!(await isRunning())) return { ok: true, forced: true };
+  }
+  return { ok: false, error: 'AstrWeChat 未能在 10 秒内退出，请手动退出后重试' };
+}
+
+
 /** GET /health，轻量探测本地 API 是否就绪（不校验 Token）。 */
 function probeHealth(baseUrl, timeout = 2500) {
   const base = normalizeBaseUrl(baseUrl);
@@ -206,8 +234,61 @@ function probeHealth(baseUrl, timeout = 2500) {
   });
 }
 
-/** 轮询 /health 直到就绪或超时。 */
-async function waitForHealth(baseUrl, options = {}) {
+/**
+ * 用 Token 探测 /api/v1/sessions?limit=1，验证 Token 是否真的有效。
+ * 401/403 → token 无效；500 → （AstrWeChat 未完成微信连接时）Token 本身有效但数据源未就绪；
+ * 其他网络错误 → 服务不可达。
+ */
+function probeSessions(baseUrl, token, timeout = 3000) {
+  const base = normalizeBaseUrl(baseUrl);
+  if (!base) return Promise.resolve({ ok: false, reason: 'no-base', error: '未配置 API 地址' });
+  if (!token) return Promise.resolve({ ok: false, reason: 'no-token', error: '没有 Token' });
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    let request;
+    try {
+      const url = new URL(`${base}/api/v1/sessions?limit=1`);
+      const client = url.protocol === 'https:' ? https : http;
+      request = client.get(
+        url,
+        {
+          timeout,
+          headers: {
+            Accept: 'application/json',
+            'User-Agent': 'WeNotice/1.0',
+            Authorization: `Bearer ${token}`
+          }
+        },
+        (res) => {
+          res.resume();
+          if (res.statusCode === 401 || res.statusCode === 403) {
+            done({ ok: false, reason: 'invalid-token', status: res.statusCode, error: `HTTP ${res.statusCode}（Token 无效）` });
+          } else if (res.statusCode >= 500) {
+            done({ ok: false, reason: 'not-connected', status: res.statusCode, error: `HTTP ${res.statusCode}（AstrWeChat 未完成微信连接）` });
+          } else if (res.statusCode >= 200 && res.statusCode < 300) {
+            done({ ok: true, status: res.statusCode });
+          } else {
+            done({ ok: false, reason: 'http-error', status: res.statusCode, error: `HTTP ${res.statusCode}` });
+          }
+        }
+      );
+      request.on('timeout', () => {
+        request.destroy();
+        done({ ok: false, reason: 'timeout', error: '连接超时' });
+      });
+      request.on('error', (err) => done({ ok: false, reason: 'network', error: err.code || err.message }));
+    } catch (err) {
+      done({ ok: false, reason: 'exception', error: err.message });
+    }
+  });
+}
+
+/** 轮询 /health 直到就绪或超时。 */async function waitForHealth(baseUrl, options = {}) {
   const timeoutMs = options.timeoutMs || 30000;
   const intervalMs = options.intervalMs || 1200;
   const startedAt = Date.now();
@@ -231,8 +312,10 @@ async function waitForHealth(baseUrl, options = {}) {
 module.exports = {
   findAstrWechat,
   isRunning,
+  stopAstrWechat,
   launchAstrWechat,
   probeHealth,
+  probeSessions,
   waitForHealth,
   exists,
   normalizeBaseUrl

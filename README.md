@@ -129,10 +129,13 @@ $env:ELECTRON_RUN_AS_NODE = $null
 2. 安装 AstrWeChat（GitHub Releases 下载 `AstrWeChat-1.5.0-Setup.exe`，约 123MB，需管理员权限）。
 3. 打开 AstrWeChat → 左侧「微信连接」：点「自动检测」→ 点「自动获取」（等它提示后**再登录微信**），
    拿到密钥后检查数据目录/微信 ID，点「连接数据库」，能看到会话列表即成功。若已有密钥可手动填写。
-4. AstrWeChat → 设置：开启 **API 服务**（默认 `http://127.0.0.1:5031`）、开启 **主动推送**、复制 **Access Token**。
+4. **开启 AstrWeChat 本地 API**（AstrWeChat 1.5.0 没有独立的「设置 → API 服务」页）：
+   - 推荐：打开 WeNotice → 设置 → 数据源 → 点 **「一键开启 AstrWeChat API」**，它会自动写入 AstrWeChat 配置（开启 API 服务 + 主动推送）并重启 AstrWeChat，然后自动读取 Token；
+   - 手动：AstrWeChat → 左侧 **「Bridge」页** → 点「启动 AstrWeChat / 保存并启动」，该流程会一并开启 API 服务与主动推送并生成 Access Token（端口默认 `http://127.0.0.1:5031`）。
+   > Token 不需要手动复制：WeNotice 默认会自动读取 `%APPDATA%\weflow\WeFlow-config.json` 里的 `httpApiToken`。该字段可能是 AstrWeChat 用系统加密保存的 `safe:...` 形式，WeNotice 会先解密再使用，并在写入前用 `/api/v1/sessions` 校验，避免覆盖能用 Token。解密失败时会给出提示（此时点「一键开启 AstrWeChat API」可让 AstrWeChat 重新生成明文 Token）。
 5. 打开 WeNotice（会自动拉起并等待 AstrWeChat 的 API）→ 右上角齿轮「设置」→ 数据源：
    - API 地址：`http://127.0.0.1:5031`
-   - Access Token：粘贴上一步的 Token
+   - Access Token：点「自动读取」（或粘贴 Token）
    - 点「测试连接」应看到：健康检查 通过 / Token 有效 / 微信连接 正常 / 会话数 > 0 / 实时推送 可用
    - 保存设置，并在侧边栏关闭演示模式（或点「退出演示」）
 6. 之后新消息会实时出现在通知中心，命中「提醒」级规则的才会弹 Windows 通知。
@@ -151,7 +154,8 @@ $env:ELECTRON_RUN_AS_NODE = $null
 - **规则引擎**：内置 12 类词库 + 5 个一键示例模板；自定义规则支持关键词/正则/发送者/会话/范围（全部、群聊、私聊、公众号、服务号）与 5 种动作（桌面提醒、只列表、忽略、收藏、必须提醒）
 - **通知策略**：免打扰时段（支持跨零点）、同会话合并窗口、每分钟频率上限、仅重要分类、提示音、通知点击直达消息并自动标记已读
 - **首次使用向导**：首次启动引导「演示体验 → 连接 AstrWeChat → 开启 API → 测试连接」，可从 设置 → 应用 → 新手引导 再次打开
-- **Token 自动读取**：连接前自动从 `%APPDATA%\weflow\WeFlow-config.json` 读取 AstrWeChat 的 API Token，AstrWeChat 重启换 Token 也无需手动复制（设置里可关闭或手动覆盖）
+- **一键开启 AstrWeChat API**：设置 → 数据源 点一下，自动写入 AstrWeChat 配置（开启 API 服务 + 主动推送）并重启它，再自动读取 Token——不用再找 AstrWeChat 里藏起来的开关
+- **Token 自动读取**：连接前自动从 `%APPDATA%\weflow\WeFlow-config.json` 读取 AstrWeChat 的 API Token（包含 `safe:` 系统加密形式会自动解密，且先用 `/api/v1/sessions` 校验有效才写入），AstrWeChat 重启换 Token 也无需手动复制（设置里可关闭或手动覆盖）
 - **规则导入 / 导出**：规则弹窗底部支持 JSON 导入导出，方便备份、迁移和分享规则
 - **诊断导出**：设置 → 应用 → 导出诊断信息，生成脱敏的配置 + 启动日志，反馈问题时直接附带
 - **托盘常驻**：关闭窗口按设置隐藏到托盘；托盘菜单显示未读数/连接状态，可暂停提醒、切换演示、退出
@@ -192,7 +196,9 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 ## 8. 常见问题
 
-**Q：测试连接失败 / 401？** A：确认 AstrWeChat 已启动且 API 服务开启；新版默认会**自动读取** AstrWeChat 配置里的 Token（设置 → 数据源 → 「自动读取 Token」），也可以点输入框旁的「自动读取」按钮手动同步；确认端口 5031 没被占用。
+**Q：测试连接失败 / 401？** A：确认 AstrWeChat 已启动且 API 服务开启（**注意：AstrWeChat 1.5.0 没有「设置 → API 服务」页，开关在左侧「Bridge」页**）；新版会自动读取 AstrWeChat 配置里的 Token（设置 → 数据源 → 「自动读取 Token」），也可以点输入框旁的「自动读取」按钮手动同步；确认端口 5031 没被占用。如果提示「Token 加密无法解密」，说明 AstrWeChat 用系统加密/口令模式保存了 Token：打开 AstrWeChat → Bridge → 启动 AstrWeChat，再点「自动读取」，或手动复制 Token 粘贴。
+
+**Q：AstrWeChat 里找不到「开启 API / 主动推送」的开关？** A：AstrWeChat 1.5.0 没有独立的 API 设置页，开关藏在左侧 **「Bridge」页**的「启动 AstrWeChat / 保存并启动」流程里：点它会启动本地消息服务、开启 API 服务与主动推送，并生成 Access Token。更省事的办法：WeNotice → 设置 → 数据源 → 点「一键开启 AstrWeChat API」，程序会替你改配置并重启 AstrWeChat。
 
 **Q：第一次打开弹出的「欢迎使用 WeNotice」向导是什么？怎么关掉 / 再打开？** A：这是首次使用向导（演示 → 连接 AstrWeChat → 开启 API → 测试连接），每台电脑只出现一次。点「稍后」会关闭并记住；想再看：设置 → 应用 → 新手引导。
 
@@ -200,7 +206,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 **Q：状态显示「连接异常：AstrWeChat 尚未完成微信连接」？** A：说明 API 与 Token 都正常，但 AstrWeChat 还没接上微信数据库。打开 AstrWeChat → 左侧「微信连接」完成「自动检测 → 自动获取密钥（需微信先退出登录）→ 登录微信 → 连接数据库」，然后回 WeNotice 点「重新连接」。侧边栏和空状态页都会给出这条指引。
 
-**Q：打开 WeNotice 后一直显示「正在启动 AstrWeChat…」？** A：AstrWeChat 冷启动一般 15–25 秒；若超过 35 秒仍无响应，多半是 AstrWeChat 启动了但没开「API 服务」，或安装路径没被自动检测到——可在 设置 → 数据源 里手动指定 `AstrWeChat.exe` 路径，并检查 AstrWeChat 的 API 设置。
+**Q：打开 WeNotice 后一直显示「正在启动 AstrWeChat…」？** A：AstrWeChat 冷启动一般 15–25 秒；若超过 35 秒仍无响应，多半是 AstrWeChat 启动了但没开启本地 API（去 AstrWeChat → 「Bridge」页 → 启动 AstrWeChat），或安装路径没被自动检测到——可在 设置 → 数据源 里手动指定 `AstrWeChat.exe` 路径。
 
 **Q：连接成功但收不到新消息？** A：检查 AstrWeChat 是否开启「主动推送」；微信是否在登录状态并在收消息；可在 WeNotice 状态栏看是「实时推送」还是「轮询模式」。
 
@@ -347,4 +353,5 @@ powershell -ExecutionPolicy Bypass -File tools\sign-exe.ps1 -File dist\WeNotice\
   - [WeFlow](https://github.com/hicccc77/WeFlow)：AstrWeChat 的数据内核来源，许可见其仓库。
   - [Electron](https://www.electronjs.org/)：MIT。
 - 合规提醒：微信官方明确反对第三方读取聊天数据（chatlog 项目已因律师函于 2025-10 删除代码）。本项目仅供**本机个人自用/学习研究**，请勿用于商业或营销场景，账号风险需自行承担。
+
 

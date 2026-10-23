@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('we', {
   testSource: () => ipcRenderer.invoke('src:test'),
   reconnect: () => ipcRenderer.invoke('src:reconnect'),
   readAstrToken: () => ipcRenderer.invoke('cfg:astr-token'),
+  enableAstrApi: () => ipcRenderer.invoke('astr:enable-api'),
   togglePause: (value) => ipcRenderer.invoke('app:pause', { value }),
   toggleDemo: (value) => ipcRenderer.invoke('demo:toggle', { value }),
   simulateMessage: () => ipcRenderer.invoke('demo:simulate'),
@@ -53,3 +54,4 @@ contextBridge.exposeInMainWorld('we', {
     return () => ipcRenderer.removeListener('we:event', handler);
   }
 });
+

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Notification, Tray, Menu, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, Notification, Tray, Menu, ipcMain, dialog, shell, nativeImage, globalShortcut, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -58,6 +58,8 @@ const IS_SHOT = Boolean(SHOT_PATH);
 // 而原生 WinForms 托盘正常，因此把托盘交给启动器更可靠。
 const LAUNCHER_TRAY = hasFlag('launcher-tray');
 const TEST_MINIMIZE = hasFlag('test-minimize');
+const TEST_ENABLE_API = hasFlag('test-enable-api');
+const TEST_TOKEN_FORMAT = hasFlag('test-token-format');
 
 if (!app.isPackaged) {
   const devData = process.env.WENOTICE_DATA_DIR || path.join(__dirname, '..', '.data');
@@ -298,48 +300,105 @@ function astrConfigPath() {
   return path.join(base, 'weflow', 'WeFlow-config.json');
 }
 
+/**
+ * AstrWeChat 用 Electron safeStorage（Windows 上是 DPAPI）保存 httpApiToken：
+ * 配置文件里的值可能是 `safe:<base64>`；口令模式下是 `lock:<密文>`。
+ * 直接把这个字符串当 Token 用会 401，所以这里先尝试还原成明文。
+ * 返回 { ok, token, encrypted, reason }，reason 用于界面给出可操作的提示。
+ */
+function decodeAstrToken(raw) {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return { ok: false, token: '', encrypted: false, reason: 'empty' };
+  if (value.startsWith('safe:')) {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) {
+        return { ok: false, token: '', encrypted: true, reason: 'unavailable' };
+      }
+      const buf = Buffer.from(value.slice(5), 'base64');
+      const plain = safeStorage.decryptString(buf);
+      if (!plain || !plain.trim()) return { ok: false, token: '', encrypted: true, reason: 'decrypt-failed' };
+      return { ok: true, token: plain.trim(), encrypted: true, reason: 'ok' };
+    } catch (err) {
+      return { ok: false, token: '', encrypted: true, reason: 'decrypt-failed', error: String(err && err.message) };
+    }
+  }
+  if (value.startsWith('lock:')) {
+    return { ok: false, token: '', encrypted: true, reason: 'password-mode' };
+  }
+  return { ok: true, token: value, encrypted: false, reason: 'plain' };
+}
+
 function readAstrConfig() {
   try {
     const file = astrConfigPath();
-    if (!fs.existsSync(file)) return { ok: false, error: '未找到 AstrWeChat 配置文件' };
+    const exists = fs.existsSync(file);
+    const base = { file, exists, port: 5031, host: '127.0.0.1', apiEnabled: false, pushEnabled: false };
+    if (!exists) {
+      return Object.assign(base, { ok: false, error: '未找到 AstrWeChat 配置文件', token: '', tokenReason: 'no-file' });
+    }
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return {
+    const decoded = decodeAstrToken(data.httpApiToken);
+    if (!decoded.ok) {
+      bootLog(`astr token decode: reason=${decoded.reason}${decoded.error ? ` (${decoded.error})` : ''}`);
+    }
+    return Object.assign(base, {
       ok: true,
-      file,
-      token: typeof data.httpApiToken === 'string' ? data.httpApiToken.trim() : '',
+      token: decoded.token,
+      tokenEncrypted: decoded.encrypted,
+      tokenReason: decoded.reason,
+      tokenRawLength: typeof data.httpApiToken === 'string' ? data.httpApiToken.length : 0,
+      tokenLooksEncrypted: typeof data.httpApiToken === 'string' && /^(safe|lock):/.test(data.httpApiToken.trim()),
       port: Number(data.httpApiPort) || 5031,
       host: data.httpApiHost || '127.0.0.1',
       apiEnabled: Boolean(data.httpApiEnabled),
       pushEnabled: Boolean(data.messagePushEnabled)
-    };
+    });
   } catch (err) {
-    return { ok: false, error: err.message || String(err) };
+    return { ok: false, error: err.message || String(err), token: '', tokenReason: 'invalid-json' };
   }
 }
 
 /**
  * AstrWeChat 重启后 Token 可能变化。连接前自动读取它本机配置里的 httpApiToken 并同步，
  * 免去用户每次手动复制。设置里可关闭（source.autoTokenSync = false）。
+ *
+ * 注意：不能盲目覆盖——AstrWeChat 可能把 Token 加密成 safe:/lock:，解密失败或 Token 无效时
+ * 覆盖会破坏用户本来能用的 Token。因此这里先用 /api/v1/sessions 验证，通过才落盘。
  */
-function syncTokenFromAstrConfig() {
+let lastTokenSync = { at: 0, ok: false, reason: 'never' };
+
+async function syncTokenFromAstrConfig() {
   const cfg = config().source || {};
-  if (cfg.autoTokenSync === false) return null;
+  const report = (value) => {
+    lastTokenSync = Object.assign({ at: Date.now() }, value);
+    return value;
+  };
+  if (cfg.autoTokenSync === false) return report({ ok: false, reason: 'disabled' });
+
   const astr = readAstrConfig();
   if (!astr.ok) {
     bootLog(`token sync skipped: ${astr.error}`);
-    return null;
+    return report({ ok: false, reason: 'no-config', error: astr.error });
   }
   if (!astr.token) {
-    bootLog(`token sync skipped: no token in ${astr.file}`);
-    return null;
+    bootLog(`token sync skipped: token unavailable (${astr.tokenReason})`);
+    return report({ ok: false, reason: astr.tokenReason || 'no-token' });
   }
+
+  const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl || `http://${astr.host}:${astr.port}`);
+  const probe = await AstrWechat.probeSessions(base, astr.token, 3000);
+  if (!probe.ok) {
+    bootLog(`token sync skipped: probe failed (${probe.reason}${probe.status ? ` ${probe.status}` : ''})`);
+    return report({ ok: false, reason: probe.reason || 'probe-failed', error: probe.error, status: probe.status, tokenEncrypted: astr.tokenEncrypted });
+  }
+
   if (cfg.token === astr.token) {
     bootLog('token sync: unchanged');
-    return null;
+    return report({ ok: true, reason: 'unchanged', tokenEncrypted: astr.tokenEncrypted });
   }
   store.saveConfig({ source: { token: astr.token } });
-  bootLog('token sync: updated from AstrWeChat config');
-  return astr.token;
+  bootLog(`token sync: updated from AstrWeChat config (${astr.tokenEncrypted ? 'decrypted' : 'plain'})`);
+  return report({ ok: true, reason: 'updated', tokenEncrypted: astr.tokenEncrypted });
 }
 
 function maskSecret(value) {
@@ -347,6 +406,96 @@ function maskSecret(value) {
   if (!str) return '';
   if (str.length <= 8) return '****';
   return `${str.slice(0, 4)}…${str.slice(-4)}`;
+}
+
+/**
+ * 一键开启 AstrWeChat 的本地 API + 主动推送。
+ *
+ * AstrWeChat 1.5.0 并没有「设置 → API 服务」这样的独立页面，开关藏在「Bridge」页的
+ * 「启动 AstrWeChat / 保存并启动」流程里（内部会 httpApiEnabled=true、messagePushEnabled=true
+ * 并生成 httpApiToken）。很多用户会卡在这一步，所以这里直接改它的配置文件再重启它。
+ */
+async function enableAstrApi() {
+  const log = [];
+  const push = (msg) => {
+    log.push(msg);
+    bootLog(`astr-enable: ${msg}`);
+  };
+  const fail = (error) => ({ ok: false, error, log });
+
+  const astr = readAstrConfig();
+  if (!astr.ok) {
+    return fail(`未找到 AstrWeChat 配置文件（${astr.error}）。请先安装并打开一次 AstrWeChat，完成微信连接后再试。`);
+  }
+  const cfg = config().source || {};
+  const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl || `http://${astr.host}:${astr.port}`);
+
+  if (astr.apiEnabled && astr.pushEnabled && astr.token) {
+    push('AstrWeChat 配置里 API 服务与主动推送已开启，无需修改');
+    await syncTokenFromAstrConfig();
+    const health = await AstrWechat.probeHealth(base, 2500);
+    return {
+      ok: health.ok,
+      already: true,
+      token: astr.token,
+      apiEnabled: true,
+      log,
+      warning: health.ok ? '' : '配置已开启，但当前没有连上本地 API：请确认 AstrWeChat 正在运行'
+    };
+  }
+
+  try {
+    if (await AstrWechat.isRunning()) {
+      push('AstrWeChat 正在运行，先停止它以写入 API 配置（约 3 秒）…');
+      const stopped = await AstrWechat.stopAstrWechat();
+      if (!stopped.ok) return fail(stopped.error || '停止 AstrWeChat 失败');
+      push('AstrWeChat 已停止');
+    }
+
+    const file = astrConfigPath();
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    // 如果原 Token 是 safe:/lock: 加密形式，先尝试还原；还原失败则改写成明文随机 Token。
+    const decoded = decodeAstrToken(data.httpApiToken);
+    const token = decoded.ok && decoded.token ? decoded.token : crypto.randomBytes(16).toString('hex');
+    const tokenRewritten = !(decoded.ok && decoded.token);
+    data.httpApiHost = data.httpApiHost || '127.0.0.1';
+    data.httpApiPort = Number(data.httpApiPort) || 5031;
+    data.httpApiEnabled = true;
+    data.messagePushEnabled = true;
+    data.httpApiToken = token;
+
+    try {
+      fs.copyFileSync(file, `${file}.wenotice-bak`);
+    } catch (_err) {
+      /* 备份失败不阻塞 */
+    }
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmp, file);
+    push(`已写入 API 配置：启用 API 服务 + 主动推送（端口 ${data.httpApiPort}）`);
+    if (tokenRewritten) push('原 Token 是加密形式且无法还原，已用新的明文 Token 覆盖（AstrWeChat 里重新打开 Bridge 页即可看到同步）');
+
+    const exePath = await AstrWechat.findAstrWechat(cfg.astrwechatPath);
+    if (!exePath) {
+      return fail(`配置已写入，但没有找到 AstrWeChat.exe。请手动打开 AstrWeChat 后回来点「重新连接」。`);
+    }
+    push('正在重新启动 AstrWeChat…');
+    const launched = await AstrWechat.launchAstrWechat(exePath);
+    if (!launched.ok) return fail(launched.error || '启动 AstrWeChat 失败');
+    const waited = await AstrWechat.waitForHealth(base, {
+      timeoutMs: 45000,
+      intervalMs: 1200,
+      onTick: (sec) => push(`等待 AstrWeChat 本地 API 就绪…（${sec}s）`)
+    });
+    if (!waited.ok) {
+      return fail(`AstrWeChat 已启动，但本地 API 未就绪（${waited.error || '超时'}）。请确认 AstrWeChat 已登录微信，或打开 AstrWeChat 查看「Bridge」页是否有报错。`);
+    }
+    push('AstrWeChat 本地 API 已就绪');
+    store.saveConfig({ source: { token } });
+    return { ok: true, already: false, token, apiEnabled: true, log };
+  } catch (err) {
+    return fail(err.message || String(err));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +591,7 @@ let sourceStarting = false;
  *  3) 轮询 /health 等待 API 就绪（最多 30s），再建立 SSE 实时推送。
  */
 async function ensureSourceReady() {
-  if (!demoActive) syncTokenFromAstrConfig();
+  if (!demoActive) await syncTokenFromAstrConfig();
   const cfg = config().source || {};
   if (!cfg.baseUrl) {
     source.setStatus('no-config', '未配置 API 地址');
@@ -488,7 +637,7 @@ async function ensureSourceReady() {
         source.setStatus(
           'error',
           stillRunning
-            ? 'AstrWeChat 已在运行，但本地 API 未响应：请在 AstrWeChat「设置」中开启 API 服务，并确认地址与端口一致'
+            ? 'AstrWeChat 已在运行，但本地 API 未响应：请在 AstrWeChat「Bridge」页点「启动 AstrWeChat」（会自动开启 API 与主动推送），或在 WeNotice 设置里点「一键开启 AstrWeChat API」'
             : `AstrWeChat 启动失败（${waited.error || '超时'}），请手动打开 AstrWeChat 后重试`
         );
         return { ok: false, error: 'health-timeout' };
@@ -870,6 +1019,45 @@ function createWindow() {
     if (IS_SHOT) {
       setTimeout(captureAndQuit, SHOT_DELAY);
     }
+    if (TEST_ENABLE_API) {
+      // 自助回归测试：验证「一键开启 AstrWeChat API」流程（会重启 AstrWeChat）。
+      setTimeout(async () => {
+        try {
+          const result = await enableAstrApi();
+          bootLog(`test-enable-api: ${JSON.stringify(result)}`);
+        } catch (err) {
+          bootLog(`test-enable-api error: ${err.message || err}`);
+        }
+        setTimeout(() => {
+          isQuitting = true;
+          app.quit();
+        }, 500);
+      }, 2500);
+    }
+    if (TEST_TOKEN_FORMAT) {
+      // 自助回归测试：验证 safe: 加密 Token 的解码（本应用自己加密再解码）。
+      setTimeout(() => {
+        try {
+          const sample = 'sample-token-1234567890';
+          const encrypted = `safe:${safeStorage.encryptString(sample).toString('base64')}`;
+          const decoded = decodeAstrToken(encrypted);
+          const plain = decodeAstrToken('plain-token-abc');
+          const lock = decodeAstrToken('lock:xxxx');
+          const garbage = decodeAstrToken('safe:not-base64!!');
+          bootLog(`test-token-format: available=${safeStorage.isEncryptionAvailable()} encLen=${encrypted.length}`);
+          bootLog(`test-token-format: encrypted.decode=${JSON.stringify({ ok: decoded.ok, reason: decoded.reason, match: decoded.token === sample })}`);
+          bootLog(`test-token-format: plain=${JSON.stringify({ ok: plain.ok, token: plain.token, reason: plain.reason })}`);
+          bootLog(`test-token-format: lock=${JSON.stringify({ ok: lock.ok, reason: lock.reason })}`);
+          bootLog(`test-token-format: garbage=${JSON.stringify({ ok: garbage.ok, reason: garbage.reason })}`);
+        } catch (err) {
+          bootLog(`test-token-format error: ${err.message || err}`);
+        }
+        setTimeout(() => {
+          isQuitting = true;
+          app.quit();
+        }, 500);
+      }, 1500);
+    }
     if (TEST_MINIMIZE) {
       // 自助回归测试：验证「最小化到托盘」是否真的把窗口隐藏（不回到底部任务栏）。
       setTimeout(() => {
@@ -1084,7 +1272,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('src:test', async () => {
-    syncTokenFromAstrConfig();
+    await syncTokenFromAstrConfig();
     return source.test();
   });
 
@@ -1152,7 +1340,28 @@ function registerIpc() {
     return { ok: true };
   });
 
-  ipcMain.handle('cfg:astr-token', () => readAstrConfig());
+  ipcMain.handle('cfg:astr-token', async () => {
+    const astr = readAstrConfig();
+    const cfg = config().source || {};
+    const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl || `http://${astr.host || '127.0.0.1'}:${astr.port || 5031}`);
+    const health = await AstrWechat.probeHealth(base, 2500);
+    let probe = null;
+    if (astr.token) probe = await AstrWechat.probeSessions(base, astr.token, 3000);
+    return Object.assign({}, astr, {
+      tokenMasked: astr.token ? maskSecret(astr.token) : '',
+      probe,
+      health,
+      apiListening: Boolean(health && health.ok)
+    });
+  });
+
+  ipcMain.handle('astr:enable-api', async () => {
+    try {
+      return await enableAstrApi();
+    } catch (err) {
+      return { ok: false, error: err.message || String(err), log: [] };
+    }
+  });
 
   ipcMain.handle('app:diagnostics', async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -1192,7 +1401,13 @@ function registerIpc() {
       JSON.stringify(cfg, null, 2),
       '',
       '--- AstrWeChat config ---',
-      JSON.stringify(readAstrConfig(), null, 2),
+      JSON.stringify((() => {
+        const astr = readAstrConfig();
+        return Object.assign({}, astr, {
+          token: astr.token ? `${maskSecret(astr.token)} (len ${astr.token.length}, ${astr.tokenEncrypted ? 'decrypted' : 'plain'})` : `<empty: ${astr.tokenReason || 'unknown'}>`
+        });
+      })(), null, 2),
+      `lastTokenSync: ${JSON.stringify(lastTokenSync)}`,
       '',
       '--- boot.log (tail) ---',
       tailText(bootLogFile),
@@ -1322,7 +1537,13 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
       startDemo({ fast: true });
     } else {
       // 允许在 Token 为空时也从 AstrWeChat 本机配置自动补齐（用户无需手动复制）
-      if (!cfg.token) syncTokenFromAstrConfig();
+      if (!cfg.token) {
+        try {
+          await syncTokenFromAstrConfig();
+        } catch (_err) {
+          /* 同步失败不影响启动 */
+        }
+      }
       const readyCfg = config().source || {};
       if (readyCfg.autoConnect !== false && readyCfg.baseUrl && readyCfg.token) {
         ensureSourceReady();
@@ -1356,3 +1577,4 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
     if (store) store.flushNow();
   });
 }
+
