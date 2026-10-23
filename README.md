@@ -1,5 +1,12 @@
 # WeNotice · 微信通知过滤器
 
+> **English summary**: WeNotice is a free, open-source Windows desktop app (MIT, Electron) that
+> reads your own WeChat messages from a local API (AstrWeChat/WeFlow, loopback only), classifies
+> them with a rule engine, and shows only the important ones (announcements, verification codes,
+> payments, deliveries, schedules…) as Windows notifications. No cloud, no telemetry, no data
+> collection — see [PRIVACY.md](PRIVACY.md). Windows builds are code-signed via the
+> [SignPath Foundation](https://signpath.org) free code-signing program for open-source projects.
+
 > 自动读取本机微信消息，用「内置识别 + 自定义规则」筛出真正值得看一眼的**通知类消息**，
 > 只在此时弹出 Windows 桌面通知；广告、闲聊、链接、无效消息全部留在「全部消息」里，不打扰。
 
@@ -11,7 +18,10 @@
 所有数据都在本机处理，不经过任何云端。
 
 - 开源地址：<https://github.com/Liuyeyuyangy0/WeNotice>
+- 下载：<https://github.com/Liuyeyuyangy0/WeNotice/releases/latest>（便携版 zip，解压即用，无需安装）
+- 代码签名：Windows 构建由 **SignPath Foundation**（<https://signpath.org>）提供的免费开源代码签名服务签名（项目已提交申请）
 - 协议：MIT（AstrWeChat 为独立的 AGPL-3.0 第三方软件，本项目**不捆绑、不分发**它的代码）
+- 隐私：本项目不收集任何用户数据，详见 [PRIVACY.md](PRIVACY.md)
 
 ![主界面](docs/screenshots/main.png)
 
@@ -271,6 +281,9 @@ node build\test-rules.js   # 参考 test-rules.js 的写法
 ---
 
 ## 11. 代码签名（可选）
+
+本项目已向 **SignPath Foundation**（<https://signpath.org>，面向开源项目的免费代码签名计划）提交申请；
+获批后，GitHub Actions 构建出的 `WeNotice.exe` 将由 SignPath Foundation 免费签名。
 
 未签名 exe **在本机运行一般不会弹 SmartScreen**（SmartScreen 主要针对从网络下载、带 Mark-of-the-Web 标记的文件）。签名有两种用途：
 
