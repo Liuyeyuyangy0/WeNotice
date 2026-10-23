@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath Artifact Configuration：给 WeNotice 启动器签名。
+
+  用途：在 SignPath 控制台创建 Artifact Configuration 时粘贴本文件内容，
+        并把 slug 设为 `wenotice-launcher`（或你喜欢的名字，同时在 GitHub 仓库
+        Variables 里配置 SIGNPATH_ARTIFACT_CONFIG_SLUG）。
+
+  说明：
+  - GitHub actions/upload-artifact 上传时会自动打成 ZIP，所以根元素必须是 <zip-file>。
+  - 我们只签 WeNotice.exe（启动器，包含我们的代码）；Electron 运行时 electron.exe
+    是第三方官方二进制，保持原样不签。
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="WeNotice.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

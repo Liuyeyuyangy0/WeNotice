@@ -1,0 +1,127 @@
+name: Build & Release (portable)
+
+# 构建 Windows 便携版；如果配置了 SignPath（开源免费签名），会自动给 WeNotice.exe 签名。
+#
+# 触发方式：
+#   1) push tag v1.0.1        → 构建并创建 / 更新对应 Release
+#   2) Actions 页面手动运行   → 只构建，产物在 Actions Artifacts 里
+#
+# 需要的仓库配置（SignPath 批准后设置，见 docs/SIGNPATH-APPLICATION.md）：
+#   Variables: SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG /
+#              SIGNPATH_ORGANIZATION_ID / SIGNPATH_ARTIFACT_CONFIG_SLUG
+#   Secret:    SIGNPATH_API_TOKEN
+# 未配置时自动跳过签名，只产出未签名包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则取 app/package.json；打 tag 时以 tag 为准）'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  ELECTRON_VERSION: '45.0.0'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = '${{ github.event.inputs.version }}'
+          if ('${{ github.ref_type }}' -eq 'tag') { $v = '${{ github.ref_name }}'.TrimStart('v') }
+          if (-not $v) { $v = (Get-Content app/package.json -Raw | ConvertFrom-Json).version }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Download Electron runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools/electron-dist | Out-Null
+          node tools/download-electron.mjs $env:ELECTRON_VERSION tools/electron.zip
+          tar.exe -xf tools/electron.zip -C tools/electron-dist
+
+      - name: Build portable package (unsigned)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tools/build-portable.ps1 -Version '${{ steps.ver.outputs.version }}'
+
+      # ---- 可选：SignPath 开源签名（给启动器 WeNotice.exe 签名） -----------------
+      - name: Upload launcher for signing
+        id: upload-unsigned
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: wenotice-launcher-unsigned
+          path: dist/WeNotice/WeNotice.exe
+          if-no-files-found: error
+
+      - name: Submit signing request to SignPath
+        id: signpath
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIG_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Replace launcher with signed copy
+        if: vars.SIGNPATH_PROJECT_SLUG != ''
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem -Recurse -File signed -Filter 'WeNotice.exe' | Select-Object -First 1
+          if (-not $signed) { throw '签名产物里找不到 WeNotice.exe' }
+          Copy-Item $signed.FullName dist/WeNotice/WeNotice.exe -Force
+          Get-AuthenticodeSignature dist/WeNotice/WeNotice.exe | Format-List Status,StatusMessage
+
+      # ---- 打包 ------------------------------------------------------------------
+      - name: Package portable zip
+        id: pack
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $zip = "dist/WeNotice-portable-$v.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          tar.exe -a -c -f $zip -C dist WeNotice
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  WeNotice-portable-$v.zip" | Out-File "dist/WeNotice-portable-$v.zip.sha256" -Encoding ascii
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          Write-Host "sha256=$hash"
+
+      - name: Upload portable zip as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeNotice-portable-${{ steps.ver.outputs.version }}
+          path: |
+            dist/WeNotice-portable-${{ steps.ver.outputs.version }}.zip
+            dist/WeNotice-portable-${{ steps.ver.outputs.version }}.zip.sha256
+
+      - name: Create / update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/WeNotice-portable-${{ steps.ver.outputs.version }}.zip
+            dist/WeNotice-portable-${{ steps.ver.outputs.version }}.zip.sha256
+          generate_release_notes: true

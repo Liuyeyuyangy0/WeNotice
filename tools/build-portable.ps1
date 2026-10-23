@@ -1,9 +1,13 @@
-﻿# WeNotice 便携版打包脚本
-# 用法：powershell -ExecutionPolicy Bypass -File tools\build-portable.ps1
+# WeNotice 便携版打包脚本
+# 用法：powershell -ExecutionPolicy Bypass -File tools\build-portable.ps1 [-Version 1.0.0]
 # 产物：dist\WeNotice\WeNotice.exe（启动器）+ electron.exe（运行时，保持原名）
 #
 # 说明：Electron 在部分 Windows 环境下重命名 electron.exe 会导致启动崩溃（0xC0000005），
 #       因此这里保留 electron.exe 原名，另编译一个同名启动器 WeNotice.exe 负责拉起应用。
+
+param(
+    [string]$Version = '1.0.0'
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -44,7 +48,7 @@ Copy-Item -Path $launcherExe -Destination (Join-Path $distDir 'WeNotice.exe') -F
 
 Write-Host "[6/6] 写入版本与说明…"
 $electronVersion = Get-Content (Join-Path $electronDir 'version') -ErrorAction SilentlyContinue
-Set-Content -Path (Join-Path $distDir 'version.txt') -Value "WeNotice 1.0.0 (portable, Electron $electronVersion)" -Encoding UTF8
+Set-Content -Path (Join-Path $distDir 'version.txt') -Value "WeNotice $Version (portable, Electron $electronVersion)" -Encoding UTF8
 Copy-Item -Path (Join-Path $root 'README.md') -Destination $distDir -Force -ErrorAction SilentlyContinue
 
 $size = [math]::Round((Get-ChildItem $distDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB, 1)

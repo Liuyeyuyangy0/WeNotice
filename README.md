@@ -288,6 +288,17 @@ powershell -ExecutionPolicy Bypass -File tools\sign-exe.ps1 -File dist\WeNotice\
 > 注意：网上教程里 `signtool sign ... /p <密码>` 的尖括号只是占位符，直接在 PowerShell 里输入会报
 > `"<"运算符是为将来使用而保留的`；请替换成真实密码，或直接用本仓库的 `tools\sign-exe.ps1` 参数传入。
 
+### 自动签名（CI，推荐对外分发用）
+
+本仓库提供 GitHub Actions 流水线 `.github/workflows/release.yml`：
+
+- 打 tag 推送到 GitHub 后自动构建便携版并创建 Release（附 `.sha256` 校验文件）；
+- 如果仓库配置了 **SignPath Foundation 免费开源签名**（见 [docs/SIGNPATH-APPLICATION.md](docs/SIGNPATH-APPLICATION.md)），
+  构建流程会自动给 `WeNotice.exe` 签上受信任的证书；没配置则跳过签名，照常出包。
+
+申请 SignPath 免费签名的完整步骤（填写什么、SignPath 后台怎么配、GitHub 变量/密钥怎么设）都在
+[docs/SIGNPATH-APPLICATION.md](docs/SIGNPATH-APPLICATION.md)。
+
 ---
 
 ## 12. 许可
