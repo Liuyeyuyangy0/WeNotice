@@ -1,25 +1,33 @@
 # 托盘图标的实现与排障记录
 
-> 本文记录 WeNotice 1.0.1 起「托盘图标显示」方案的设计取舍，以及开发机上的排障过程。
+> 本文记录 WeNotice 1.0.x 起「托盘图标显示」方案的设计取舍与根因。
 > 如果你遇到托盘图标不显示，先看文末「用户自救」一节。
 
-## 背景
+## 最终结论（根因）
 
-WeNotice 最初用 Electron 自带的 `Tray` API 显示托盘图标。开发机上出现了一个很难解释的现象：
+**可执行文件放在「受限目录 / 代理工作区」里运行时，Windows 会拒绝对该进程的托盘注册**，
+`Shell_NotifyIcon(NIM_ADD)` 直接返回 `FALSE`、`GetLastError()=5 (ERROR_ACCESS_DENIED)`，
+Electron 的 `new Tray()` 也不会报错到 JS 层，所以表现为「代码明明成功、系统里就是没有图标」。
 
-- `tray created` 日志证明 `new Tray(icon)` 调用成功（`imageEmpty=false`、`destroyed=false`）；
-- 但 Windows 11 的托盘溢出面板（任务栏右下角 `^`）里始终没有 WeNotice；
-- 换成纯色 32×32 PNG、多尺寸 `.ico`、换 Electron 44/45 都一样；
-- 注册表 `HKCU\Control Panel\NotifyIconSettings` 里始终没有 `electron.exe` 的登记项；
-- 用 C# 直接调用 `Shell_NotifyIcon(NIM_ADD)` 做对照测试，返回 `NIM_ADD=False ERR=5`（拒绝访问）；
-- 但同一个开发环境里，其他 Electron 应用（AstrWeChat）和 WinForms 应用（如任务管理器）的托盘图标正常显示。
+本机实测证据：
 
-结论：**在部分 Windows 环境/启动方式下，Electron 进程调用的托盘注册会被系统拒绝，且不会报错到 JS 层。**
-这不是图标文件、代码写法或 Electron 版本的问题（均已逐一排除），也很难在用户侧修复。
+| 运行位置 | 结果 |
+| --- | --- |
+| `…\deepseek-harness\default-workspace\wenotice\dist\WeNotice\`（代理工作区内） | `NIM_ADD=False err=5`，托盘无图标 |
+| 同一个 `TrayProbe5.exe`，复制到 `%LOCALAPPDATA%\TrayProbePathTest\` | `NIM_ADD=True err=0`，托盘正常 |
+| 整个 `WeNotice` 目录复制到 `C:\Users\<用户名>\WeNotice\` | 托盘图标正常显示（`WeNotice · N 条未读`） |
 
-## 方案：把托盘移到启动器
+其它已排除的因素：图标文件（PNG/多尺寸 ICO 都试过）、Electron 版本（44/45 一样）、
+`app.setAppUserModelId`、`--no-sandbox`、DPI、会话（始终 Session 2 / 交互式）、
+第三方安全软件（本机只有 Defender）、注册表缓存。
 
-Electron 进程「注册不上」，但**原生 WinForms 进程可以**。所以我们把托盘交给 `WeNotice.exe` 启动器：
+> 因此：**请把 WeNotice 放在普通用户目录运行**，例如
+> `%LOCALAPPDATA%\Programs\WeNotice` 或 `C:\Users\<用户名>\WeNotice`，
+> 不要放在 AI 代理工作区、同步盘、受控企业目录等受限位置。
+
+## 方案：托盘由启动器托管
+
+即使目录没问题，Electron 的 `Tray` 在个别环境也有兼容问题，所以托盘交给 `WeNotice.exe` 启动器：
 
 1. 启动器（C# WinForms，`tools/launcher.cs`）拉起同目录的 `electron.exe`，并传入 `--launcher-tray`；
 2. 应用收到该参数后不创建 Electron 托盘，而是在 `127.0.0.1` 的**随机端口**上开一个本地控制接口，把 `{ port, token }` 写入 `resources\.data\control.json`；
@@ -29,21 +37,22 @@ Electron 进程「注册不上」，但**原生 WinForms 进程可以**。所以
 
 安全约束：控制接口只监听 `127.0.0.1`，Token 每次启动随机生成；`control.json` 在用户数据目录内，不进入仓库与发行包。
 
-## 兜底：全局快捷键
+## 最小化行为
 
-即使托盘图标由于任何原因不可见，`Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）（Electron `globalShortcut`）也能随时把窗口找回来；
-再次运行 `WeNotice.exe` 也会唤醒已有窗口（单实例锁）。
+- 点标题栏「—」：窗口隐藏到托盘（默认，可在 设置 → 应用 关闭）；
+- 点「×」：同样按设置隐藏到托盘；
+- 恢复窗口：托盘图标单击/双击、`Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）、或再次运行 `WeNotice.exe`（单实例锁会唤醒已有窗口）。
 
 ## 用户自救
 
-1. 点任务栏右下角 `^`，把 WeNotice 图标从展开区拖到任务栏固定；
-2. 找不到图标时按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）；
-3. 仍不行：设置 → 应用 → 关闭「最小化到托盘」，最小化就会回到任务栏；
-4. 反馈问题时可附上 `resources\.data\boot.log`（含托盘/控制接口是否创建成功）。
+1. 确认 WeNotice 不在受限/同步/代理工作区目录（见上表），建议整个文件夹移到 `C:\Users\<用户名>\WeNotice`；
+2. 点任务栏右下角 `^`，把 WeNotice 图标从展开区拖到任务栏固定；
+3. 找不到图标时按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`）；
+4. 仍不行：设置 → 应用 → 关闭「最小化到托盘」，最小化就会回到任务栏；
+5. 反馈问题时可附上安装目录下的 `WeNotice-launcher.log`（启动器托盘日志）与 `resources\.data\boot.log`。
 
 ## 相关文件
 
 - `tools/launcher.cs`：启动器源码（编译为 `dist\WeNotice\WeNotice.exe`）
-- `app/main.js`：`--launcher-tray` 模式、控制接口、全局快捷键
+- `app/main.js`：`--launcher-tray` 模式、控制接口、全局快捷键、最小化处理
 - `tools/build-portable.ps1`：打包时编译启动器并复制进 dist
-

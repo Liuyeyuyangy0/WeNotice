@@ -80,10 +80,17 @@ dist\WeNotice\WeNotice.exe
 > `WeNotice.exe` 只是一个轻量启动器（约 38KB），真正运行的是同目录下的 `electron.exe`——Electron 在部分 Windows 环境下重命名后可执行文件会启动崩溃，所以保持原名。**分发时请整个 `WeNotice` 文件夹一起拷贝**，不要只拿 `WeNotice.exe`，也不要手动给 `electron.exe` 改名。
 >
 > 启动器会先按正常方式启动；若所在环境限制了 Chromium 沙箱（企业终端、远程会话、受管主机等）导致 electron 秒退，会自动追加 `--no-sandbox` 重试一次，保证应用能打开。
+>
+> ⚠️ **安装位置很重要**：请把整个 `WeNotice` 文件夹放在**普通用户目录**运行，例如
+> `%LOCALAPPDATA%\Programs\WeNotice` 或 `C:\Users\<用户名>\WeNotice`。
+> 放在 AI 代理工作区、同步盘、受控企业目录等「受限目录」里运行时，Windows 会拒绝对该进程的托盘注册
+> （`Shell_NotifyIcon` 返回 ACCESS_DENIED），表现为**托盘没有图标**——这是环境限制，不是应用缺陷。
+> 本机已验证：同一份程序放在代理工作区内托盘不显示，移到 `C:\Users\<用户名>\WeNotice` 后图标正常。
 
 ![便携版启动](docs/screenshots/packaged.png)
 
-用户数据位于 `%APPDATA%\WeNotice\data\`（config.json / rules.json / history.json）。
+用户数据目录：便携版为 `<WeNotice目录>\resources\.data\data\`（跟着文件夹走，可整体拷贝）；
+以 asar 安装包运行时为 `%APPDATA%\WeNotice\data\`。
 
 ### 方式 B：开发模式（改代码时）
 
@@ -146,7 +153,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 ## 6. 数据与隐私
 
-- 消息只在本机内存与 `data\history.json` 中保存（默认上限 2000 条）。数据目录：安装/开发版为 `%APPDATA%\WeNotice\data`；便携版为 `dist\WeNotice\resources\.data\data`（跟随文件夹走，可整体拷贝）
+- 消息只在本机内存与 `data\history.json` 中保存（默认上限 2000 条）。数据目录：便携版为 `<WeNotice目录>\resources\.data\data`（跟随文件夹走，可整体拷贝）；以 asar 安装包运行时为 `%APPDATA%\WeNotice\data`
 - Access Token 仅写入本机 config.json（明文，与他人共用电脑时请注意）
 - 不访问任何远程服务；AI 功能仅在你主动启用并填写自己的 API Key 时，才会把「待判定消息文本」发到你所配置的接口
 - 应用不做任何网络代理、不上传通讯录/朋友圈数据
@@ -160,6 +167,8 @@ $env:ELECTRON_RUN_AS_NODE = $null
 - WeNotice 只负责「读消息 + 筛选 + 通知」，**不支持发送/回复**（AstrWeChat 的发送依赖 UI 自动化，稳定性另说）
 - 桌面通知依赖 Windows 通知权限；若系统未开启，应用内仍会收到消息
 - 便携版入口是启动器 `WeNotice.exe`（拉起同目录 `electron.exe`），不要重命名 `electron.exe`；否则可能在部分 Windows 环境启动崩溃（已实测）
+- **不要把 WeNotice 放在受限目录**（AI 代理工作区、同步盘、受控企业目录等）：Windows 会拒绝对该进程注册托盘图标（`Shell_NotifyIcon` ACCESS_DENIED），表现为托盘无图标。请放到普通用户目录，详见 `docs/TRAY.md`
+- 未签名的本地构建首次运行会被 SmartScreen 提示「发布者未知」，这是 Windows 对未知程序的常规拦截，不是应用行为
 - 本项目不含微信客户端修改，不注入进程；但第三方读取微信数据本身存在账号风险，请自行判断
 
 ---
@@ -174,7 +183,9 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 **Q：连接成功但收不到新消息？** A：检查 AstrWeChat 是否开启「主动推送」；微信是否在登录状态并在收消息；可在 WeNotice 状态栏看是「实时推送」还是「轮询模式」。
 
-**Q：点了最小化，窗口不见了、也找不到小图标？** A：WeNotice 默认「最小化到托盘」，窗口会从任务栏消失。托盘图标由 `WeNotice.exe` 启动器显示，通常位于任务栏右下角的「^」展开区：点「^」→ 找到 WeNotice 图标（悬停会显示「WeNotice · N 条未读」）→ 单击恢复窗口；也可以把它从「^」里拖到任务栏固定。**如果「^」里仍然没有图标**（已知个别 Windows 环境下托盘位置异常），直接按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`） 就能把窗口找回——这是专门为此准备的全局快捷键；再次启动 WeNotice 也会恢复已有窗口。首次最小化时应用会弹一条系统气泡提示图标位置。不想用这个行为：设置 → 应用 → 关闭「最小化到托盘」，最小化就会留在任务栏。
+**Q：双击 WeNotice.exe 弹出「Windows 已保护你的电脑 / 发布者未知」？** A：这是 SmartScreen 对**未签名新程序**的常规拦截（本地构建的 exe 没有受信任的代码签名），不是应用行为。点「更多信息 → 仍要运行」即可；如果是从网上/聊天软件下载的 zip，先右键 zip 或解压后的文件夹 → 属性 → 勾选「解除锁定」再解压/运行。想让它显示发布者、减少提示，可以用 `tools/sign-exe.ps1` 做本机自签名（只在本机有效）；对外分发建议配置 SignPath 免费开源签名，见 §11。
+
+**Q：点了最小化，窗口不见了、也找不到小图标？** A：先确认 WeNotice **不在受限目录**（AI 代理工作区、同步盘、受控企业目录等）——受限目录下 Windows 会拒绝注册托盘图标，请把整个文件夹移到 `C:\Users\<用户名>\WeNotice` 这类普通用户目录（详见 §3 方式 A 与 `docs/TRAY.md`）。WeNotice 默认「最小化到托盘」，窗口会从任务栏消失。托盘图标由 `WeNotice.exe` 启动器显示，通常位于任务栏右下角的「^」展开区：点「^」→ 找到 WeNotice 图标（悬停会显示「WeNotice · N 条未读」）→ 单击恢复窗口；也可以把它从「^」里拖到任务栏固定。**如果「^」里仍然没有图标**，直接按 `Ctrl+Alt+Shift+W`（备用 `Ctrl+Alt+F9`） 就能把窗口找回——这是专门为此准备的全局快捷键；再次启动 WeNotice 也会恢复已有窗口。首次最小化时应用会弹一条系统气泡提示图标位置。不想用这个行为：设置 → 应用 → 关闭「最小化到托盘」，最小化就会留在任务栏。
 
 **Q：为什么通知中心里有很多「回填」消息？** A：应用连上数据源后会补齐最近 12 小时的记录，方便立即看到历史通知。回填消息不会弹通知、不计入未读；不需要可在 设置 → 数据源 关闭「连接后回填最近消息」。
 

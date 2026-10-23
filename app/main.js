@@ -57,6 +57,7 @@ const IS_SHOT = Boolean(SHOT_PATH);
 // 背景：本机/部分 Windows 环境下 Electron 的 Tray 注册后系统不显示图标（见 docs/TRAY.md），
 // 而原生 WinForms 托盘正常，因此把托盘交给启动器更可靠。
 const LAUNCHER_TRAY = hasFlag('launcher-tray');
+const TEST_MINIMIZE = hasFlag('test-minimize');
 
 if (!app.isPackaged) {
   const devData = process.env.WENOTICE_DATA_DIR || path.join(__dirname, '..', '.data');
@@ -610,15 +611,28 @@ let trayHintShown = false;
 function showTrayHint() {
   if (trayHintShown) return;
   trayHintShown = true;
-  if (!tray || tray.isDestroyed()) return;
+  const hasElectronTray = tray && !tray.isDestroyed();
+  const hotkey = hotkeyRegistered || 'Ctrl+Alt+Shift+W';
+  if (hasElectronTray) {
+    try {
+      tray.displayBalloon({
+        icon: trayImage(),
+        title: 'WeNotice 已最小化到系统托盘',
+        content: '仍在后台监听微信消息。点任务栏右下角「^」里的 WeNotice 图标即可恢复，或按 ' + hotkey + ' 唤起窗口。'
+      });
+    } catch (_err) {
+      /* 个别系统不支持气泡，忽略 */
+    }
+    return;
+  }
+  // 启动器托盘模式：图标在 WeNotice.exe 进程里，气泡由应用侧通知代替。
   try {
-    tray.displayBalloon({
-      icon: trayImage(),
-      title: 'WeNotice 已最小化到系统托盘',
-      content: '仍在后台监听微信消息。点任务栏右下角「^」里的 WeNotice 图标即可恢复；可在 设置 → 应用 关闭「最小化到托盘」。'
-    });
+    new Notification({
+      title: 'WeNotice 已最小化到托盘',
+      body: '仍在后台监听微信消息。点任务栏右下角「^」里的 WeNotice 图标恢复窗口，或按 ' + hotkey + ' 唤起。'
+    }).show();
   } catch (_err) {
-    /* 个别系统不支持气泡，忽略 */
+    /* 通知不可用时忽略 */
   }
 }
 
@@ -790,6 +804,18 @@ function createWindow() {
     if (IS_SHOT) {
       setTimeout(captureAndQuit, SHOT_DELAY);
     }
+    if (TEST_MINIMIZE) {
+      // 自助回归测试：验证「最小化到托盘」是否真的把窗口隐藏（不回到底部任务栏）。
+      setTimeout(() => {
+        bootLog(`test-minimize: before visible=${mainWindow.isVisible()} minimized=${mainWindow.isMinimized()}`);
+        mainWindow.minimize();
+        setTimeout(() => {
+          bootLog(`test-minimize: after visible=${mainWindow.isVisible()} minimized=${mainWindow.isMinimized()}`);
+          isQuitting = true;
+          app.quit();
+        }, 1200);
+      }, 1500);
+    }
   });
 
   mainWindow.on('close', (event) => {
@@ -804,7 +830,9 @@ function createWindow() {
     if (isQuitting || IS_SHOT) return;
     const appCfg = config().app || {};
     if (appCfg.minimizeToTray === false) return;
-    if (!tray || tray.isDestroyed()) return;
+    const hasElectronTray = tray && !tray.isDestroyed();
+    // 启动器托盘模式（--launcher-tray）下托盘图标由 WeNotice.exe 启动器提供，应用自身不创建托盘。
+    if (!hasElectronTray && !LAUNCHER_TRAY) return;
     event.preventDefault();
     mainWindow.hide();
     showTrayHint();

@@ -39,6 +39,8 @@ internal static class Program
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e) { Log("thread-exception: " + e.Exception); };
 
         appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
         string target = Path.Combine(appDir, "electron.exe");
@@ -48,6 +50,7 @@ internal static class Program
             return;
         }
 
+        Log("launcher start: " + BuildArgs(args));
         controlFile = Path.Combine(appDir, "resources", ".data", "control.json");
         string baseArgs = BuildArgs(args) + " --launcher-tray";
 
@@ -83,7 +86,9 @@ internal static class Program
 
         // 等待应用把控制接口写好（冷启动可能 1-5 秒），再显示托盘。
         if (!WaitForControl(30000)) { Fail("应用已启动，但在 30 秒内没有就绪（缺少 control.json）。请查看 resources\\.data\\boot.log。"); }
+        Log("control ready: " + (apiBase ?? "<null>"));
         CreateTray();
+        Log("tray ready, entering message loop");
         StartStateTimer();
         Application.Run();
     }
@@ -147,49 +152,73 @@ internal static class Program
 
     private static void CreateTray()
     {
-        Icon icon;
         try
         {
-            icon = new Icon(Path.Combine(appDir, "resources", "app", "assets", "icon.ico"));
+            Icon icon;
+            try
+            {
+                icon = new Icon(Path.Combine(appDir, "resources", "app", "assets", "icon.ico"));
+            }
+            catch (Exception exIcon)
+            {
+                Log("tray icon load failed, fallback SystemIcons: " + exIcon.Message);
+                icon = SystemIcons.Application;
+            }
+
+            tray = new NotifyIcon();
+            tray.Icon = icon;
+            tray.Text = "WeNotice · 微信通知过滤器";
+            tray.Visible = true;
+            tray.DoubleClick += delegate { LaunchAction("show"); };
+
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("打开通知中心", null, delegate { LaunchAction("show"); });
+            var pauseItem = new ToolStripMenuItem("暂停提醒", null, delegate
+            {
+                string state = Request("state");
+                string toggle = state != null && state.IndexOf("\"paused\":true") >= 0 ? "pause?value=0" : "pause?value=1";
+                Request(toggle);
+            });
+            pauseItem.Name = "pause";
+            menu.Items.Add(pauseItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("设置…", null, delegate { LaunchAction("settings"); });
+            menu.Items.Add("退出 WeNotice", null, delegate
+            {
+                quitting = true;
+                Request("quit");
+                DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+                while (DateTime.UtcNow < deadline && appProc != null && !appProc.HasExited) Thread.Sleep(100);
+                if (appProc != null && !appProc.HasExited) { try { appProc.Kill(); } catch (Exception) { } }
+                Shutdown();
+            });
+            menu.Opening += delegate
+            {
+                string state = Request("state");
+                pauseItem.Text = state != null && state.IndexOf("\"paused\":true") >= 0 ? "恢复提醒" : "暂停提醒";
+            };
+            tray.ContextMenuStrip = menu;
+            Log("tray created: visible=" + tray.Visible);
+        }
+        catch (Exception ex)
+        {
+            Log("tray create FAILED: " + ex);
+        }
+    }
+
+    /** 启动器自身的诊断日志（只有加载托盘失败等异常情况才需要看）。 */
+    private static void Log(string message)
+    {
+        try
+        {
+            string path = Path.Combine(appDir, "WeNotice-launcher.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.Delete(path);
+            File.AppendAllText(path, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + message + Environment.NewLine, Encoding.UTF8);
         }
         catch (Exception)
         {
-            icon = SystemIcons.Application;
+            // 日志失败不影响主流程
         }
-
-        tray = new NotifyIcon();
-        tray.Icon = icon;
-        tray.Text = "WeNotice · 微信通知过滤器";
-        tray.Visible = true;
-        tray.DoubleClick += delegate { LaunchAction("show"); };
-
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("打开通知中心", null, delegate { LaunchAction("show"); });
-        var pauseItem = new ToolStripMenuItem("暂停提醒", null, delegate
-        {
-            string state = Request("state");
-            string toggle = state != null && state.IndexOf("\"paused\":true") >= 0 ? "pause?value=0" : "pause?value=1";
-            Request(toggle);
-        });
-        pauseItem.Name = "pause";
-        menu.Items.Add(pauseItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("设置…", null, delegate { LaunchAction("settings"); });
-        menu.Items.Add("退出 WeNotice", null, delegate
-        {
-            quitting = true;
-            Request("quit");
-            DateTime deadline = DateTime.UtcNow.AddSeconds(3);
-            while (DateTime.UtcNow < deadline && appProc != null && !appProc.HasExited) Thread.Sleep(100);
-            if (appProc != null && !appProc.HasExited) { try { appProc.Kill(); } catch (Exception) { } }
-            Shutdown();
-        });
-        menu.Opening += delegate
-        {
-            string state = Request("state");
-            pauseItem.Text = state != null && state.IndexOf("\"paused\":true") >= 0 ? "恢复提醒" : "暂停提醒";
-        };
-        tray.ContextMenuStrip = menu;
     }
 
     private static void StartStateTimer()
