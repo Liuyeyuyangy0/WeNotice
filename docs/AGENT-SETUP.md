@@ -217,9 +217,34 @@ Agent 输出报告时：Token/密钥一律打码（保留前 4 位 + 长度）�
 | Bridge 启动失败 `Python was not found ... 退出码 9009` | PATH 上的 python 是 Microsoft Store 存根 | Bridge 与 WeNotice 无关，可忽略；要修 Bridge 用 `tools/fix-astr-bridge.ps1`（仅本机修复路径已验证） |
 | `Python 3.15.1` 报缺 `requests` | Bridge 用系统 Python 且没装依赖 | 同上；或装 3.12 并 `pip install -r resources\bridge\requirements.txt` |
 | 「无法连接 AstrBot」 | Bridge 的 AstrBot 地址/服务没起 | Bridge 可选功能，不影响 WeNotice 通知 |
+| AstrWeChat 弹「无法连接 AstrBot，请确认服务已启动、地址及端口正确；5 秒后重试」 | AstrWeChat → Bridge 页当前后端是「AstrBot」，正尝试连 `ws://127.0.0.1:11229/ws`，但本机没有运行 AstrBot | **与 WeNotice 无关**，按 6.1 处理 |
 | 托盘图标不出现 | 程序放在受限目录（如 `Documents\...` 工作区、网盘同步目录） | 整个 WeNotice 文件夹移到 `C:\Users\<用户名>\WeNotice` 重开 |
 | 5031 被占用 | 上次 AstrWeChat 没退干净 / 别的程序占用 | `Get-NetTCPConnection -LocalPort 5031` 找 PID 处理后重启 AstrWeChat |
 | QQ 已连接但没消息 | 群里没人说话 / NapCat 掉线 / 同名会话被忽略 | 让群里发一条消息验证；看 WeNotice 设置里 QQ 测试连接结果 |
+
+### 6.1 「无法连接 AstrBot，请确认服务已启动、地址及端口正确；5 秒后重试」
+
+这条提示来自 **AstrWeChat 的 Bridge**（不是 WeNotice）。Bridge 页当前后端是「AstrBot」，会去连
+`ws://127.0.0.1:11229/ws`；本机没有跑 AstrBot 就会一直重试。
+
+**对 WeNotice 没有影响**：WeNotice 只读 AstrWeChat 的本地 HTTP API（`127.0.0.1:5031`），不经过 Bridge。
+处理方式按需求选一种：
+
+- **A. 不用 Bridge（只收通知，最常见）**
+  AstrWeChat → Bridge 页 → 不要点「启动 AstrWeChat」；已经启动的点「停止」。
+  需要 API 时用 WeNotice 的「一键开启 AstrWeChat API」就够了（只启 API 服务 + 主动推送，不启 Bridge）。
+- **B. 确实要用 AstrBot 机器人**
+  1. 安装并启动 AstrBot；
+  2. 在 AstrBot 里配置 OneBot v11 的 WebSocket 服务端（默认端口 `11229`、路径 `/ws`，若不同以 AstrBot 配置为准）；
+  3. AstrWeChat → Bridge → 地址填 `ws://127.0.0.1:11229/ws`，Token 与 AstrBot 侧保持一致；
+  4. 点「保存并启动」，出现已连接即可。Bridge 的 Python 依赖问题见上面 9009 / `requests` 两行。
+- **C. 用内置模型（不想装 AstrBot）**
+  Bridge 页把后端切换成「内置模型」，填 OpenAI 兼容的 Base URL / API Key / 模型名，保存后启动。
+- **D. 用 KouriChat**
+  Bridge 页后端选「KouriChat」，填它的 OneBot 地址与 Token。
+
+> Agent 只需要判断「WeNotice 的微信数据源是否已连接、`/health` 与 `/api/v1/sessions` 是否正常」；
+> AstrBot 连接失败不用修，也不要为了消除提示去改 Bridge 后端配置（属于用户偏好）。
 
 ---
 

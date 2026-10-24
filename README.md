@@ -261,6 +261,8 @@ pwsh -File tools\setup-napcat.ps1 -InstallDir C:\Users\<你>\NapCat -Repair
 
 **Q：为什么某些重要消息没弹通知？** A：点开消息详情看「命中原因」；内置识别偏保守（比如链接类默认只列队不提醒），可用「规则」页加一条 must_notify 规则，优先级调小（更优先）。
 
+**Q：AstrWeChat 弹「无法连接 AstrBot，请确认服务已启动、地址及端口正确；5 秒后重试」怎么办？** A：这是 AstrWeChat **Bridge** 的提示，跟 WeNotice 无关——Bridge 页当前后端是「AstrBot」，在连 `ws://127.0.0.1:11229/ws`，本机没装/没启动 AstrBot 就会一直重试。只收通知的话：AstrWeChat → Bridge 页不要启动（或停止）Bridge，用 WeNotice 的「一键开启 AstrWeChat API」开本地 API 即可。要用机器人：装并启动 AstrBot，在 AstrBot 里开 OneBot v11 WebSocket（默认 `127.0.0.1:11229`、路径 `/ws`），把 Bridge 的后端地址/Token 对上；也可在 Bridge 页切到「内置模型」或「KouriChat」。详见 `docs/AGENT-SETUP.md` 6.1。
+
 **Q：会封号吗？** A：WeNotice 不注入微信、不模拟登录，只读 AstrWeChat 解密后的本地数据；风险主要来自 AstrWeChat 读取数据库本身，以及微信对第三方读取的打击态度。
 
 **Q：怎么接 QQ 消息？** A：WeNotice 不自带 QQ 协议，需要先在本机跑一个 OneBot 11 协议端，推荐 NapCatQQ（基于 Windows QQNT）。最省事的做法是用仓库自带的一键脚本 `tools\setup-napcat.ps1`（见 §4.1.1，实测从零安装/修复都能跑通）。手动步骤：装好 NapCat 并扫码登录 → NapCat WebUI 里开启「WebSocket 服务器」（默认 `ws://127.0.0.1:3001`）→ WeNotice 设置 → 「QQ 数据源 · OneBot 11」→ 启用并填地址/Token → 测试连接。详细步骤见 §4.1。WeNotice 只读接收，不会向 QQ 发消息。
