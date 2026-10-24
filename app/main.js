@@ -797,57 +797,69 @@ let sourceStarting = false;
  */
 async function ensureSourceReady() {
   if (!demoActive) await syncTokenFromAstrConfig();
-  const cfg = config().source || {};
+  let cfg = config().source || {};
   if (!cfg.baseUrl) {
     source.setStatus('no-config', '未配置 API 地址');
     return { ok: false, error: '未配置 API 地址' };
   }
-  if (!cfg.token) {
-    source.setStatus('no-config', '尚未填写 Access Token');
-    return { ok: false, error: '尚未填写 Access Token' };
-  }
   if (sourceStarting) return { ok: false, error: '正在启动中' };
   sourceStarting = true;
   try {
+    // 没有任何 Token 且允许自动启动时，直接走「一键开启」流程（生成 Token + 拉起 AstrWeChat）
+    if (!cfg.token) {
+      if (cfg.autoLaunchAstrWechat === false) {
+        source.setStatus('no-config', '尚未填写 Access Token');
+        return { ok: false, error: '尚未填写 Access Token' };
+      }
+      bootLog('ensure: no token, running enable-astr-api');
+      source.setStatus('launching', '正在初始化 AstrWeChat 本地 API…');
+      const enabled = await enableAstrApi();
+      bootLog(`ensure: enable-astr-api ok=${enabled.ok} error=${enabled.error || ''} needElevation=${Boolean(enabled.needElevation)}`);
+      if (!enabled.ok) {
+        source.setStatus('error', enabled.hint || enabled.error || '初始化 AstrWeChat API 失败');
+        return { ok: false, error: enabled.error || 'enable-failed' };
+      }
+      cfg = config().source || {};
+    }
+
     const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl);
+    bootLog(`ensure: probe ${base}`);
     const health = await AstrWechat.probeHealth(base, 2500);
     if (!health.ok) {
+      bootLog(`ensure: probe failed (${health.error || 'unknown'})`);
       if (cfg.autoLaunchAstrWechat === false) {
         source.setStatus('error', `AstrWeChat 未运行（已关闭自动启动）：${health.error || ''}`);
         return { ok: false, error: health.error || 'not-running' };
       }
       const running = await AstrWechat.isRunning();
+      bootLog(`ensure: AstrWeChat running=${running}`);
       if (!running) {
-        source.setStatus('launching', 'AstrWeChat 未运行，正在自动启动…');
-        const exePath = await AstrWechat.findAstrWechat(cfg.astrwechatPath);
-        if (!exePath) {
-          source.setStatus('error', '未找到 AstrWeChat，请先安装，或在设置里手动指定 AstrWeChat.exe 路径');
-          return { ok: false, error: 'astrwechat-not-found' };
-        }
-        const launched = await AstrWechat.launchAstrWechat(exePath);
-        if (!launched.ok) {
-          source.setStatus('error', launched.error || '启动 AstrWeChat 失败');
-          return { ok: false, error: launched.error };
+        // AstrWeChat 没在运行：完整初始化（写入新的本地 Token + 启动 AstrWeChat + 等 API 就绪）
+        source.setStatus('launching', 'AstrWeChat 未运行，正在自动启动并配置本地 API…');
+        const enabled = await enableAstrApi();
+        bootLog(`ensure: enable-astr-api ok=${enabled.ok} error=${enabled.error || ''} needElevation=${Boolean(enabled.needElevation)}`);
+        if (!enabled.ok) {
+          source.setStatus('error', enabled.hint || enabled.error || '启动 AstrWeChat 失败');
+          return { ok: false, error: enabled.error || 'launch-failed' };
         }
       } else {
         source.setStatus('launching', 'AstrWeChat 已在运行，正在等待本地 API 就绪…');
-      }
-      const waited = await AstrWechat.waitForHealth(base, {
-        timeoutMs: 30000,
-        intervalMs: 1200,
-        onTick: (sec) => source.setStatus('launching', `正在等待 AstrWeChat 本地 API 就绪…（${sec}s）`)
-      });
-      if (!waited.ok) {
-        const stillRunning = await AstrWechat.isRunning();
-        source.setStatus(
-          'error',
-          stillRunning
-            ? 'AstrWeChat 已在运行，但本地 API 未响应：请在 AstrWeChat「Bridge」页点「启动 AstrWeChat」（会自动开启 API 与主动推送），或在 WeNotice 设置里点「一键开启 AstrWeChat API」'
-            : `AstrWeChat 启动失败（${waited.error || '超时'}），请手动打开 AstrWeChat 后重试`
-        );
-        return { ok: false, error: 'health-timeout' };
+        const waited = await AstrWechat.waitForHealth(base, {
+          timeoutMs: 30000,
+          intervalMs: 1200,
+          onTick: (sec) => source.setStatus('launching', `正在等待 AstrWeChat 本地 API 就绪…（${sec}s）`)
+        });
+        if (!waited.ok) {
+          bootLog(`ensure: health timeout (${waited.error || 'unknown'})`);
+          source.setStatus(
+            'error',
+            'AstrWeChat 已在运行，但本地 API 未响应：请在 AstrWeChat「Bridge」页点「启动 AstrWeChat」（会自动开启 API 与主动推送），或在 WeNotice 设置里点「一键开启 AstrWeChat API」'
+          );
+          return { ok: false, error: 'health-timeout' };
+        }
       }
     }
+    bootLog('ensure: start source');
     return startSource();
   } finally {
     sourceStarting = false;
@@ -1876,7 +1888,15 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
         }
       }
       const readyCfg = config().source || {};
-      if (readyCfg.autoConnect !== false && readyCfg.baseUrl && readyCfg.token) {
+      const astrConfigReady = (() => {
+        try {
+          return Boolean(readAstrConfig().ok);
+        } catch (_err) {
+          return false;
+        }
+      })();
+      const canAutoInit = readyCfg.autoLaunchAstrWechat !== false && astrConfigReady;
+      if (readyCfg.autoConnect !== false && readyCfg.baseUrl && (readyCfg.token || canAutoInit)) {
         ensureSourceReady();
       } else {
         source.setStatus('no-config', readyCfg.token ? '已停止监听（自动连接已关闭）' : '尚未配置 AstrWeChat Access Token');
