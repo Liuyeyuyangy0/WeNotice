@@ -19,6 +19,7 @@ mini*-*.txt
 tiny-*.txt
 launcher-*.txt
 WeNotice-launch-error.txt
+WeNotice-diagnostics-*.txt
 
 # 证书 / 密钥（永远不要提交）
 *.pfx

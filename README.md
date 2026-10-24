@@ -146,6 +146,9 @@ $env:ELECTRON_RUN_AS_NODE = $null
 > 若 AstrWeChat 只开了 API 但没开「主动推送」，WeNotice 会在两次失败后自动降级为会话轮询（默认 25s），
 > 不等实时，但至少不漏。
 
+> **让 AI Agent 帮你配置？** 见 [`docs/AGENT-SETUP.md`](docs/AGENT-SETUP.md)：里面写清了 Agent 可以自动做哪些步骤、
+> 哪些必须由人工完成（取密钥、扫码登录、设口令），以及每步的只读校验命令、常见故障速查和回执模板。
+
 ---
 
 ## 4.1 接入 QQ（可选，OneBot 11）
@@ -295,6 +298,7 @@ WeNotice/
 │  ├─ mock-weflow.mjs        WeFlow/AstrWeChat API 模拟服务（无微信时联调）
 │  ├─ mock-onebot.mjs        OneBot 11 WebSocket 模拟服务端（无 QQ 时联调）
 │  ├─ setup-napcat.ps1      QQ 数据源一键安装/修复（便携 QQ + NapCat + 注入器 + 启动脚本）
+│  ├─ fix-astr-bridge.ps1   AstrWeChat Bridge 的 Python 运行时修复 / 离线依赖包（可选、实验性）
 │  ├─ launcher.cs           WeNotice.exe 启动器源码（C#，csc 编译）
 │  ├─ build-portable.ps1    便携版打包脚本
 │  ├─ gen-icons.py          应用图标生成（Pillow）
@@ -303,6 +307,7 @@ WeNotice/
 │  └─ WeNoticeLauncher.exe  启动器编译产物（打包脚本生成，不入库）
 ├─ docs/screenshots/        界面截图
 ├─ docs/TRAY.md             托盘图标实现与排障记录（启动器托管托盘、全局快捷键兜底）
+├─ docs/AGENT-SETUP.md      给 AI Agent 的自动配置指南（微信源 + QQ 源，含人工确认边界）
 ├─ dist/WeNotice/           便携版产物（运行 build-portable.ps1 生成，不入库）
 ├─ build/                   临时构建/截图/测试数据（不入库，可删除）
 ├─ LICENSE                  MIT
