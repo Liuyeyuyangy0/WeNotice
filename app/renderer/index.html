@@ -10,6 +10,7 @@
   <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
     <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 1 0-12 0c0 5-2 6.1-2 7.6h16c0-1.5-2-2.6-2-7.6Z"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2v5.2l3.4 2"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5" width="3.4" height="14" rx="1.2"/><rect x="13.6" y="5" width="3.4" height="14" rx="1.2"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5c0-.8.9-1.3 1.6-.9l9 6.5c.6.4.6 1.4 0 1.8l-9 6.5c-.7.4-1.6-.1-1.6-.9Z"/></symbol>
@@ -96,6 +97,9 @@
           </button>
           <button class="nav-item" data-view="unread" type="button">
             <svg class="ic"><use href="#i-bell"/></svg><span>未读通知</span><span class="nav-badge accent" id="badgeUnread">0</span>
+          </button>
+          <button class="nav-item" data-view="alarms" type="button">
+            <svg class="ic"><use href="#i-clock"/></svg><span>日程闹钟</span><span class="nav-badge" id="badgeAlarms">0</span>
           </button>
           <button class="nav-item" data-view="starred" type="button">
             <svg class="ic"><use href="#i-star"/></svg><span>已收藏</span><span class="nav-badge" id="badgeStarred">0</span>

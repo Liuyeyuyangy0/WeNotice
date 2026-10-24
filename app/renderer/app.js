@@ -40,6 +40,7 @@ const state = {
   paused: false,
   demo: false,
   stats: { total: 0, inbox: 0, unread: 0, today: 0 },
+  alarms: { reminders: [], pendingCount: 0, firedCount: 0, doneCount: 0, next: null },
   version: '1.0.0',
   dataDir: '',
   messages: [],
@@ -274,6 +275,7 @@ function cacheRefs() {
   refs.badgeStarred = $('#badgeStarred');
   refs.badgeIgnored = $('#badgeIgnored');
   refs.badgeAll = $('#badgeAll');
+  refs.badgeAlarms = $('#badgeAlarms');
   refs.catNav = $('#catNav');
   refs.viewTitle = $('#viewTitle');
   refs.viewCount = $('#viewCount');
@@ -319,6 +321,7 @@ function hydrate(data) {
   if (typeof data.paused === 'boolean') state.paused = data.paused;
   if (typeof data.demo === 'boolean') state.demo = data.demo;
   if (data.stats) state.stats = data.stats;
+  if (data.schedule) state.alarms = Object.assign({ reminders: [], pendingCount: 0, firedCount: 0, doneCount: 0, next: null }, data.schedule);
   if (data.version) state.version = data.version;
   if (data.dataDir) state.dataDir = data.dataDir;
 }
@@ -343,6 +346,20 @@ function handleEvent(payload) {
     case 'qq:status': {
       state.qq = payload.payload || state.qq;
       renderSidebar();
+      break;
+    }
+    case 'alarms:changed': {
+      state.alarms = Object.assign(state.alarms, payload.payload || {});
+      renderSidebar();
+      if (state.view === 'alarms') renderList();
+      break;
+    }
+    case 'alarms:refresh': {
+      window.we.listAlarms().then((data) => {
+        state.alarms = Object.assign(state.alarms, data || {});
+        renderSidebar();
+        if (state.view === 'alarms') renderList();
+      }).catch(() => {});
       break;
     }
     case 'messages:add': {
@@ -391,6 +408,11 @@ function handleEvent(payload) {
     case 'open-page': {
       if (payload.page === 'settings') openSettingsModal();
       else if (payload.page === 'rules') openRulesModal();
+      else if (payload.page === 'alarms') {
+        switchView('alarms');
+        renderSidebar();
+        renderList();
+      }
       break;
     }
     case 'toast': {
@@ -479,6 +501,7 @@ function renderSidebar() {
   const cats = countByCategory();
   if (refs.badgeInbox) setText(refs.badgeInbox, state.stats.inbox);
   if (refs.badgeUnread) setText(refs.badgeUnread, state.stats.unread);
+  if (refs.badgeAlarms) setText(refs.badgeAlarms, state.alarms.pendingCount || 0);
   if (refs.badgeStarred) setText(refs.badgeStarred, state.messages.filter((m) => m.favorite).length);
   if (refs.badgeIgnored) setText(refs.badgeIgnored, state.messages.filter((m) => m.ignored).length);
   if (refs.badgeAll) setText(refs.badgeAll, state.messages.length);
@@ -620,12 +643,18 @@ function renderStatus() {
 const VIEW_TITLES = {
   inbox: '通知中心',
   unread: '未读通知',
+  alarms: '日程闹钟',
   starred: '已收藏',
   ignored: '已忽略',
   all: '全部消息'
 };
 
 function renderList() {
+  if (state.view === 'alarms') {
+    renderAlarmsView();
+    return;
+  }
+  setHeaderMode('messages');
   const list = visibleMessages();
   const title = state.view === 'category' ? categoryMeta(state.category).label : VIEW_TITLES[state.view] || '通知中心';
   if (refs.viewTitle) setText(refs.viewTitle, title);
@@ -691,6 +720,268 @@ function cardHTML(m) {
 function mediaLabel(m) {
   const map = { image: '图片', voice: '语音', video: '视频', file: '文件', emoji: '表情', link: '链接' };
   return map[m.mediaType] || '消息';
+}
+
+/* --------------------------------------------------------------------------
+   日程闹钟
+   -------------------------------------------------------------------------- */
+
+const ALARM_STATUS_META = {
+  pending: { label: '待提醒', cls: 'is-pending' },
+  fired: { label: '已提醒', cls: 'is-fired' },
+  done: { label: '已完成', cls: 'is-done' },
+  canceled: { label: '已取消', cls: 'is-canceled' }
+};
+
+function reminderForMessage(messageId) {
+  if (!messageId) return null;
+  return (state.alarms.reminders || []).find((r) => r.messageId === messageId) || null;
+}
+
+function reminderTriggerAt(reminder) {
+  const dueAt = Number(reminder.dueAt) || 0;
+  const advance = Math.max(0, Number(reminder.advanceMin) || 0);
+  return dueAt > 0 ? dueAt - advance * 60000 : 0;
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function alarmDateText(ts) {
+  const d = new Date(Number(ts) || 0);
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const tomorrow = new Date(now.getTime() + 86400000);
+  const isTomorrow = d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate();
+  if (sameDay) return '今天';
+  if (isTomorrow) return '明天';
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function alarmTimeText(ts) {
+  const d = new Date(Number(ts) || 0);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function countdownText(ms) {
+  const diff = Number(ms) - Date.now();
+  if (diff <= 0) return '已到时间';
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '不到 1 分钟';
+  if (minutes < 60) return `${minutes} 分钟后`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时 ${minutes % 60} 分后`;
+  return `${Math.floor(hours / 24)} 天后`;
+}
+
+function toDateTimeLocal(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function setHeaderMode(mode) {
+  const isAlarms = mode === 'alarms';
+  if (refs.sortSwitch) refs.sortSwitch.hidden = isAlarms;
+  if (refs.btnMarkAll) refs.btnMarkAll.hidden = isAlarms;
+  if (refs.btnExport) refs.btnExport.hidden = isAlarms;
+  if (refs.btnNewAlarm) refs.btnNewAlarm.hidden = !isAlarms;
+}
+
+function renderAlarmsView() {
+  setHeaderMode('alarms');
+  const all = (state.alarms.reminders || []).slice();
+  const order = { pending: 0, fired: 1, done: 2, canceled: 3 };
+  all.sort((a, b) => {
+    const oa = order[a.status] != null ? order[a.status] : 9;
+    const ob = order[b.status] != null ? order[b.status] : 9;
+    if (oa !== ob) return oa - ob;
+    return Number(a.dueAt) - Number(b.dueAt);
+  });
+  const pending = all.filter((r) => r.status === 'pending');
+  if (refs.viewTitle) setText(refs.viewTitle, '日程闹钟');
+  if (refs.viewCount) setText(refs.viewCount, pending.length ? `${pending.length} 个待提醒` : `${all.length} 个`);
+
+  if (!all.length) {
+    refs.messageList.innerHTML = '';
+    refs.messageList.hidden = true;
+    refs.emptyState.hidden = false;
+    refs.emptyState.innerHTML = `<div class="empty-icon">${icon('clock')}</div>
+      <p class="empty-title">还没有日程闹钟</p>
+      <p class="empty-text">收到日程类消息时，WeNotice 会自动识别「明天下午 3 点」「11 月 1 日 19:30」这类时间并建闹钟；也可以在任意消息详情里点「设为闹钟」手动添加。</p>
+      <div class="empty-actions"><button class="btn" data-empty="demo">${icon('zap')}演示模式看看</button></div>`;
+    bindEmptyActions();
+    return;
+  }
+
+  refs.emptyState.hidden = true;
+  refs.messageList.hidden = false;
+  const scrollTop = refs.messageList.scrollTop;
+  refs.messageList.innerHTML = all.map((r) => alarmCardHTML(r)).join('');
+  refs.messageList.scrollTop = scrollTop;
+}
+
+function alarmCardHTML(reminder) {
+  const meta = ALARM_STATUS_META[reminder.status] || ALARM_STATUS_META.pending;
+  const triggerAt = reminderTriggerAt(reminder);
+  const countdown = reminder.status === 'pending' ? countdownText(triggerAt) : '';
+  const note = reminder.status === 'pending'
+    ? `${alarmDateText(triggerAt)} ${alarmTimeText(triggerAt)} 提醒 · ${countdown}`
+    : reminder.status === 'fired'
+      ? `${alarmDateText(triggerAt)} ${alarmTimeText(triggerAt)} 已触发`
+      : `${alarmDateText(triggerAt)} ${alarmTimeText(triggerAt)}`;
+  const advanceText = Number(reminder.advanceMin) > 0 ? `提前 ${reminder.advanceMin} 分钟` : '准时';
+  const actions = reminder.status === 'pending'
+    ? `<button class="mini-btn" data-alarm-act="snooze" data-minutes="5">稍后 5 分钟</button>
+       <button class="mini-btn" data-alarm-act="snooze" data-minutes="15">稍后 15 分钟</button>
+       <button class="mini-btn" data-alarm-act="done">完成</button>
+       <button class="mini-btn" data-alarm-act="remove">删除</button>`
+    : reminder.status === 'fired'
+      ? `<button class="mini-btn" data-alarm-act="done">完成</button>
+         <button class="mini-btn" data-alarm-act="remove">删除</button>`
+      : `<button class="mini-btn" data-alarm-act="remove">删除</button>`;
+  return `<article class="alarm-card ${meta.cls}" data-alarm-id="${escapeHtml(reminder.id)}">
+    <div class="alarm-clock">
+      <b>${alarmDateText(triggerAt)}</b>
+      <span>${alarmTimeText(triggerAt)}</span>
+    </div>
+    <div class="alarm-main">
+      <div class="alarm-top">
+        <span class="alarm-title">${escapeHtml(truncate(reminder.title || '日程提醒', 40))}</span>
+        <span class="alarm-chip">${meta.label}${countdown ? ` · ${countdown}` : ''}</span>
+      </div>
+      <p class="alarm-sub">${escapeHtml(note)} · ${advanceText}${reminder.sessionName ? ` · ${escapeHtml(reminder.sessionName)}` : ''}</p>
+      <div class="alarm-actions">
+        ${reminder.messageId ? '<button class="mini-btn" data-alarm-act="message">查看消息</button>' : ''}
+        ${actions}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function handleAlarmAction(action, reminderId, minutes) {
+  const reminder = (state.alarms.reminders || []).find((r) => r.id === reminderId);
+  if (!reminder) return;
+  if (action === 'message') {
+    const record = state.messages.find((m) => m.id === reminder.messageId);
+    if (!record) {
+      toast('原始消息已不在历史记录中', 'err');
+      return;
+    }
+    switchView('inbox');
+    state.search = '';
+    if (refs.searchInput) refs.searchInput.value = '';
+    selectMessage(record.id, true);
+    renderSidebar();
+    renderList();
+    scrollToSelected();
+    return;
+  }
+  if (action === 'snooze') {
+    const result = await window.we.snoozeAlarm(reminderId, Number(minutes) || 5);
+    toast(result && result.ok ? `已推迟 ${minutes || 5} 分钟` : '操作失败', result && result.ok ? 'ok' : 'err');
+    await refreshAlarms();
+    return;
+  }
+  if (action === 'done') {
+    const result = await window.we.doneAlarm(reminderId);
+    toast(result && result.ok ? '闹钟已完成' : '操作失败', result && result.ok ? 'ok' : 'err');
+    await refreshAlarms();
+    return;
+  }
+  if (action === 'remove') {
+    const result = await window.we.removeAlarm(reminderId);
+    toast(result && result.ok ? '已删除闹钟' : '操作失败', result && result.ok ? 'ok' : 'err');
+    await refreshAlarms();
+  }
+}
+
+async function refreshAlarms() {
+  try {
+    const data = await window.we.listAlarms();
+    if (data) state.alarms = Object.assign(state.alarms, data);
+  } catch (_err) {
+    /* 忽略 */
+  }
+  renderSidebar();
+  if (state.view === 'alarms') renderList();
+}
+
+function openAlarmModal(messageId) {
+  const record = state.messages.find((m) => m.id === messageId);
+  if (!record) return;
+  const existing = reminderForMessage(messageId);
+  const fallbackAt = Math.max(Date.now() + 10 * 60000, Number(record.timestamp) * 1000 + 3600000);
+  const scheduleCfg = (state.config && state.config.schedule) || {};
+  openModal({
+    title: existing ? '调整日程闹钟' : '设为日程闹钟',
+    subtitle: '到时间后弹系统通知；可提前提醒',
+    size: 'is-sm',
+    body: `
+      <div class="form-grid">
+        <label class="form-field span-2">
+          <span>提醒标题</span>
+          <input id="alarmTitle" class="input" maxlength="80" value="${escapeHtml(existing ? existing.title || '' : truncate(record.content || '', 40))}">
+        </label>
+        <label class="form-field span-2">
+          <span>提醒时间</span>
+          <input id="alarmDue" class="input" type="datetime-local" value="${toDateTimeLocal(existing ? existing.dueAt : fallbackAt)}">
+        </label>
+        <label class="form-field">
+          <span>提前提醒</span>
+          <select id="alarmAdvance" class="input">
+            ${[0, 5, 10, 15, 30, 60].map((v) => `<option value="${v}" ${Number(existing ? existing.advanceMin : scheduleCfg.advanceMin) === v ? 'selected' : ''}>${v === 0 ? '准时' : `提前 ${v} 分钟`}</option>`).join('')}
+          </select>
+        </label>
+        <div class="form-field">
+          <span>原始消息</span>
+          <div class="alarm-source">${escapeHtml(truncate(record.content || '', 48))}</div>
+        </div>
+      </div>
+      <p class="hint">想让 WeNotice 自动识别日程时间？在设置 → 日程闹钟里保持「自动识别」开启即可。</p>
+    `,
+    footer: `<button class="btn btn-ghost" id="alarmCancel">取消</button>
+      ${existing ? '<button class="btn btn-ghost" id="alarmDelete">删除闹钟</button>' : ''}
+      <button class="btn btn-primary" id="alarmSave">${icon('check')}保存闹钟</button>`
+  });
+  $('#alarmCancel').addEventListener('click', closeModal);
+  const del = $('#alarmDelete');
+  if (del) {
+    del.addEventListener('click', async () => {
+      await window.we.removeAlarm(existing.id);
+      closeModal();
+      toast('已删除闹钟', 'ok');
+      await refreshAlarms();
+    });
+  }
+  $('#alarmSave').addEventListener('click', async () => {
+    const dueRaw = $('#alarmDue').value;
+    const dueAt = dueRaw ? new Date(dueRaw).getTime() : 0;
+    if (!dueAt || Number.isNaN(dueAt)) {
+      toast('请选择有效的提醒时间', 'err');
+      return;
+    }
+    const payload = {
+      messageId: record.id,
+      title: $('#alarmTitle').value || truncate(record.content || '', 40),
+      dueAt,
+      advanceMin: Number($('#alarmAdvance').value) || 0
+    };
+    let result;
+    if (existing) {
+      result = await window.we.updateAlarm({ id: existing.id, dueAt: payload.dueAt, advanceMin: payload.advanceMin, title: payload.title, status: 'pending' });
+    } else {
+      result = await window.we.createAlarm(payload);
+    }
+    if (result && result.ok) {
+      closeModal();
+      toast('已保存日程闹钟', 'ok');
+      await refreshAlarms();
+      if (state.selectedId === record.id) renderDetail();
+    } else {
+      toast((result && result.error) || '保存失败', 'err');
+    }
+  });
 }
 
 function emptyHTML() {
@@ -1014,6 +1305,10 @@ function bindStaticEvents() {
 function switchView(view) {
   state.view = view;
   if (view !== 'category') state.category = 'all';
+  if (view === 'alarms') {
+    state.selectedId = '';
+    renderDetail();
+  }
 }
 
 function selectMessage(id, silent = false) {

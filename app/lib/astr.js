@@ -165,30 +165,39 @@ async function isRunning() {
 }
 
 /**
- * 停止 AstrWeChat：先温和结束（taskkill 不带 /F），最多等 3.5 秒；仍在则强制结束。
- * 返回 { ok, forced, error }。停止前请确认已提示用户（会断开微信连接）。
+ * 停止 AstrWeChat：先温和结束（taskkill 不带 /F），最多等约 2 秒；仍在则强制结束。
+ * 若 AstrWeChat 以管理员权限运行，普通权限的 taskkill 会返回「Access is denied」，
+ * 此时返回 elevated:true 交给界面提示用户手动退出。
+ * 返回 { ok, forced, elevated, error }。
  */
 async function stopAstrWechat() {
   if (!(await isRunning())) return { ok: true, alreadyStopped: true };
-  try {
-    await execFileAsync('taskkill.exe', ['/IM', 'AstrWeChat.exe', '/T'], 8000);
-  } catch (_err) {
-    /* 进程可能已退出，继续轮询 */
-  }
-  for (let i = 0; i < 7; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  let denied = false;
+  let forceFailed = false;
+  const kill = async (args, isForce) => {
+    const result = await execFileAsync('taskkill.exe', args, 8000);
+    if (result.err) {
+      const text = `${result.stdout}\n${result.stderr}\n${result.err.message || ''}`;
+      if (/access is denied|access denied|拒绝访问|无法终止/i.test(text)) denied = true;
+      if (isForce) forceFailed = true;
+    }
+    return result;
+  };
+  await kill(['/IM', 'AstrWeChat.exe', '/T'], false);
+  for (let i = 0; i < 4; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
     if (!(await isRunning())) return { ok: true, alreadyStopped: false };
   }
-  try {
-    await execFileAsync('taskkill.exe', ['/IM', 'AstrWeChat.exe', '/T', '/F'], 8000);
-  } catch (_err) {
-    /* 继续轮询 */
-  }
+  await kill(['/IM', 'AstrWeChat.exe', '/T', '/F'], true);
   for (let i = 0; i < 6; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 400));
     if (!(await isRunning())) return { ok: true, forced: true };
   }
-  return { ok: false, error: 'AstrWeChat 未能在 10 秒内退出，请手动退出后重试' };
+  return {
+    ok: false,
+    elevated: denied || forceFailed,
+    error: 'AstrWeChat 还在运行，WeNotice 无法自动关闭它（常见原因：AstrWeChat 以管理员权限启动，或被系统/第三方软件保护）。请手动退出 AstrWeChat（任务栏托盘右键退出，或任务管理器结束任务）后再点一次「一键开启 AstrWeChat API」。'
+  };
 }
 
 

@@ -14,6 +14,7 @@ const { AIClassifier } = require('./lib/ai');
 const AstrWechat = require('./lib/astr');
 const { evaluate, CATEGORIES, normalizeRule, RULE_TEMPLATES, normalizeText } = require('./lib/rules');
 const { humanizeContent } = require('./lib/content');
+const { parseSchedule } = require('./lib/schedule');
 
 // 启动诊断日志：默认写入 userData/boot.log（便于用户反馈问题），可用 WENOTICE_BOOT_LOG 覆盖路径。
 // 注意：userData 在下面“运行环境”里可能被重定向，所以日志路径要延迟到重定向之后再解析。
@@ -295,6 +296,173 @@ function truncate(text, max) {
 }
 
 // ---------------------------------------------------------------------------
+// 日程闹钟
+// ---------------------------------------------------------------------------
+
+const REMINDER_TICK_MS = 20000;
+let reminderTimer = null;
+
+function scheduleConfig() {
+  return (config() && config().schedule) || {};
+}
+
+function reminderTriggerAt(reminder) {
+  if (!reminder) return Infinity;
+  const advance = Math.max(0, Number(reminder.advanceMin != null ? reminder.advanceMin : scheduleConfig().advanceMin || 0));
+  return Number(reminder.dueAt) - advance * 60000;
+}
+
+function formatReminderClock(ts) {
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+  return `${d.getMonth() + 1}月${d.getDate()}日 周${week} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function reminderStats() {
+  const list = store.reminders.filter((r) => r.status !== 'canceled');
+  const pending = list.filter((r) => r.status === 'pending');
+  const next = pending.slice().sort((a, b) => reminderTriggerAt(a) - reminderTriggerAt(b))[0] || null;
+  return {
+    reminders: list,
+    pendingCount: pending.length,
+    firedCount: list.filter((r) => r.status === 'fired').length,
+    next
+  };
+}
+
+function buildReminder(record, opts = {}) {
+  const dueAt = Number(opts.dueAt);
+  const baseId = (record && record.id) || crypto.randomBytes(8).toString('hex');
+  return {
+    id: `rem-${String(baseId).replace(/[^a-zA-Z0-9:_-]/g, '').slice(-48)}-${Date.now().toString(36)}`,
+    messageId: record ? record.id : opts.messageId || '',
+    title: String(opts.title || (record ? record.content : '')).slice(0, 200),
+    sessionName: record ? record.groupName || record.sender || record.sessionName : opts.sessionName || '',
+    sender: record ? record.sender || '' : opts.sender || '',
+    categoryLabel: (record && record.categoryLabel) || '日程安排',
+    dueAt,
+    advanceMin: Math.max(0, Number(opts.advanceMin != null ? opts.advanceMin : scheduleConfig().advanceMin || 0)),
+    status: 'pending',
+    createdAt: Date.now(),
+    firedAt: 0,
+    source: opts.source || 'auto',
+    isDemo: Boolean(opts.isDemo)
+  };
+}
+
+function notifyReminderChange(reminder) {
+  sendEvent({ type: 'alarms:changed', payload: reminderStats() });
+  if (reminder) sendEvent({ type: 'alarms:patch', payload: reminder });
+  scheduleStateBroadcast();
+  scheduleTrayRefresh();
+}
+
+/**
+ * 日程消息入站时：尝试从文本里识别时间，自动建闹钟。
+ * 只在非历史回填消息上做（回填的老消息也不该突然弹闹钟），识别失败也不影响消息本身。
+ */
+function maybeAutoSchedule(record) {
+  const cfg = scheduleConfig();
+  if (!cfg.enabled || cfg.autoCreate === false) return null;
+  if (!record || record.event === 'message.revoke' || record.isSend) return null;
+  if (record.category !== 'schedule') return null;
+  if (record.fromHistory && !record.isDemo) return null;
+  if (store.findReminderByMessage(record.id)) return null;
+
+  const parsed = parseSchedule(record.content, new Date());
+  if (!parsed.ok || !parsed.dueAt) return null;
+  if (parsed.dueAt < Date.now() - 60000) return null;
+
+  const reminder = buildReminder(record, {
+    dueAt: parsed.dueAt,
+    advanceMin: cfg.advanceMin,
+    source: 'auto',
+    isDemo: record.isDemo
+  });
+  store.addReminder(reminder);
+  record.reminderId = reminder.id;
+  record.dueAt = parsed.dueAt;
+  store.updateMessage(record.id, { reminderId: reminder.id, dueAt: parsed.dueAt });
+  sendEvent({ type: 'messages:patch', payload: record });
+  sendEvent({
+    type: 'toast',
+    message: `⏰ 识别到日程：${formatReminderClock(parsed.dueAt)}，已自动设闹钟（提前 ${reminder.advanceMin} 分钟）`
+  });
+  notifyReminderChange(reminder);
+  return reminder;
+}
+
+function showReminderNotification(reminder) {
+  if (!Notification.isSupported()) return;
+  const sound = config().notify && config().notify.sound !== false && scheduleConfig().sound !== false;
+  const notification = new Notification({
+    title: `⏰ 日程提醒 · ${truncate(reminder.sessionName || '日程', 26)}`,
+    body: `${formatReminderClock(reminder.dueAt)}\n${truncate(reminder.title, 140)}`,
+    icon: APP_ICON,
+    silent: !sound,
+    timeoutType: 'never'
+  });
+  notification.on('click', () => {
+    store.updateReminder(reminder.id, { status: 'done', doneAt: Date.now() });
+    if (reminder.messageId) {
+      const patched = store.updateMessage(reminder.messageId, { read: true });
+      if (patched) sendEvent({ type: 'messages:patch', payload: patched });
+      lastFocusId = reminder.messageId;
+    }
+    showWindow();
+    if (reminder.messageId) sendEvent({ type: 'focus', id: reminder.messageId });
+    notifyReminderChange(store.getReminder(reminder.id));
+  });
+  notification.show();
+}
+
+function fireDueReminders() {
+  const now = Date.now();
+  let changed = false;
+  for (const reminder of store.reminders) {
+    if (reminder.status !== 'pending' || reminder.firedAt) continue;
+    if (reminder.isDemo && !demoActive) continue;
+    if (reminderTriggerAt(reminder) > now) continue;
+    store.updateReminder(reminder.id, { status: 'fired', firedAt: now });
+    showReminderNotification(reminder);
+    changed = true;
+  }
+  if (changed) notifyReminderChange(null);
+}
+
+function startReminderTimer() {
+  if (reminderTimer) clearInterval(reminderTimer);
+  reminderTimer = setInterval(fireDueReminders, REMINDER_TICK_MS);
+  setTimeout(fireDueReminders, 1500);
+}
+
+function createReminderFromMessage(messageId, opts = {}) {
+  const record = store.getMessage(messageId);
+  if (!record) return { ok: false, error: '消息不存在' };
+  if (store.findReminderByMessage(messageId)) return { ok: false, error: '这条消息已经有闹钟了' };
+  const parsed = parseSchedule(record.content, new Date());
+  const dueAt = Number(opts.dueAt || (parsed.ok ? parsed.dueAt : 0));
+  if (!dueAt || Number.isNaN(dueAt)) return { ok: false, error: '时间无效' };
+  const reminder = buildReminder(record, {
+    dueAt,
+    advanceMin: opts.advanceMin != null ? opts.advanceMin : scheduleConfig().advanceMin,
+    source: 'manual',
+    isDemo: record.isDemo
+  });
+  store.addReminder(reminder);
+  store.updateMessage(record.id, { reminderId: reminder.id, dueAt });
+  sendEvent({ type: 'messages:patch', payload: store.getMessage(record.id) });
+  notifyReminderChange(reminder);
+  return { ok: true, reminder };
+}
+
+function startDemoRemindersCleanup() {
+  if (store) store.clearDemoReminders();
+}
+
+// ---------------------------------------------------------------------------
 // AstrWeChat 本地配置（自动读取 Access Token）
 // ---------------------------------------------------------------------------
 
@@ -411,6 +579,15 @@ function maskSecret(value) {
   return `${str.slice(0, 4)}…${str.slice(-4)}`;
 }
 
+/** 生成用于本地 API 的随机 Token（默认 16 位字母数字，足够本机使用）。 */
+function randomToken(length = 16) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(length);
+  let token = '';
+  for (let i = 0; i < length; i += 1) token += alphabet[bytes[i] % alphabet.length];
+  return token;
+}
+
 /**
  * 一键开启 AstrWeChat 的本地 API + 主动推送。
  *
@@ -433,20 +610,6 @@ async function enableAstrApi() {
   const cfg = config().source || {};
   const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl || `http://${astr.host}:${astr.port}`);
 
-  if (astr.apiEnabled && astr.pushEnabled && astr.token) {
-    push('AstrWeChat 配置里 API 服务与主动推送已开启，无需修改');
-    await syncTokenFromAstrConfig();
-    const health = await AstrWechat.probeHealth(base, 2500);
-    return {
-      ok: health.ok,
-      already: true,
-      token: astr.token,
-      apiEnabled: true,
-      log,
-      warning: health.ok ? '' : '配置已开启，但当前没有连上本地 API：请确认 AstrWeChat 正在运行'
-    };
-  }
-
   try {
     if (await AstrWechat.isRunning()) {
       push('AstrWeChat 正在运行，先停止它以写入 API 配置（约 3 秒）…');
@@ -457,14 +620,13 @@ async function enableAstrApi() {
 
     const file = astrConfigPath();
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-    // 如果原 Token 是 safe:/lock: 加密形式，先尝试还原；还原失败则改写成明文随机 Token。
-    const decoded = decodeAstrToken(data.httpApiToken);
-    const token = decoded.ok && decoded.token ? decoded.token : crypto.randomBytes(16).toString('hex');
-    const tokenRewritten = !(decoded.ok && decoded.token);
     data.httpApiHost = data.httpApiHost || '127.0.0.1';
     data.httpApiPort = Number(data.httpApiPort) || 5031;
     data.httpApiEnabled = true;
     data.messagePushEnabled = true;
+    // 一键开启时始终写入一个新的随机 Token。AstrWeChat 退出/重启后约定直接读取配置值，
+    // 本应用也按该值读取，避免加密存储在不同机器/上下文下无法还原导致 401。
+    const token = randomToken(16);
     data.httpApiToken = token;
 
     try {
@@ -476,7 +638,6 @@ async function enableAstrApi() {
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
     fs.renameSync(tmp, file);
     push(`已写入 API 配置：启用 API 服务 + 主动推送（端口 ${data.httpApiPort}）`);
-    if (tokenRewritten) push('原 Token 是加密形式且无法还原，已用新的明文 Token 覆盖（AstrWeChat 里重新打开 Bridge 页即可看到同步）');
 
     const exePath = await AstrWechat.findAstrWechat(cfg.astrwechatPath);
     if (!exePath) {
@@ -512,7 +673,10 @@ function ingestEvent(evt, origin, opts = {}) {
   sendEvent({ type: 'messages:add', payload: record });
   if (!opts.fromHistory) showDesktopNotification(record);
   scheduleStateBroadcast();
-  if (!opts.fromHistory) maybeClassifyWithAI(record);
+  if (!opts.fromHistory) {
+    maybeAutoSchedule(record);
+    maybeClassifyWithAI(record);
+  }
   return record;
 }
 
@@ -552,7 +716,10 @@ function maybeClassifyWithAI(record) {
 function startDemo(options = {}) {
   stopSource();
   demoActive = true;
-  if (store) store.dropDemoMessages();
+  if (store) {
+    store.dropDemoMessages();
+    startDemoRemindersCleanup();
+  }
   if (!demo) {
     demo = new DemoSource();
     demo.on('message', (evt) => ingestEvent(evt, 'demo'));
@@ -719,6 +886,7 @@ function statePayload() {
     paused,
     demo: demoActive,
     stats: getStats(),
+    schedule: reminderStats(),
     version: app.getVersion(),
     isPackaged: app.isPackaged,
     dataDir: store.dataDir,
@@ -773,14 +941,30 @@ function refreshTray() {
             ? '● 正在连接…'
             : `● ${truncate(status.message || '未连接', 30)}`;
 
-  const menu = Menu.buildFromTemplate([
+  const menuItems = [
     { label: `WeNotice${stats.unread ? ` · ${stats.unread} 条未读` : ''}`, enabled: false },
     { label: statusText, enabled: false },
     { type: 'separator' },
     {
       label: '打开通知中心',
       click: () => showWindow()
-    },
+    }
+  ];
+  // 下一个日程闹钟
+  const scheduleStats = reminderStats();
+  if (scheduleStats.next) {
+    const next = scheduleStats.next;
+    menuItems.push({
+      label: `⏰ 下一个闹钟：${formatReminderClock(next.dueAt)}${next.title ? ` · ${truncate(next.title, 14)}` : ''}`,
+      click: () => {
+        showWindow();
+        sendEvent({ type: 'open-page', page: 'alarms' });
+      }
+    });
+  } else if (scheduleStats.pendingCount > 0) {
+    menuItems.push({ label: `⏰ 日程闹钟（${scheduleStats.pendingCount} 个待提醒）`, click: () => showWindow() });
+  }
+  menuItems.push(
     {
       label: paused ? '恢复提醒' : '暂停提醒',
       type: 'checkbox',
@@ -808,9 +992,14 @@ function refreshTray() {
     { type: 'separator' },
     { label: '设置…', click: () => openSettings() },
     { label: '退出 WeNotice', click: () => { isQuitting = true; app.quit(); } }
-  ]);
+  );
+  const menu = Menu.buildFromTemplate(menuItems);
   tray.setContextMenu(menu);
-  tray.setToolTip(`WeNotice · ${stats.unread} 条未读`);
+  tray.setToolTip(
+    scheduleStats.next
+      ? `WeNotice · ${stats.unread} 条未读 · 下个闹钟 ${formatReminderClock(scheduleStats.next.dueAt)}`
+      : `WeNotice · ${stats.unread} 条未读`
+  );
 }
 
 function createTray() {
@@ -1220,6 +1409,74 @@ function registerIpc() {
     return { changed };
   });
 
+  // ---------------------------------------------------------------- 日程闹钟
+  ipcMain.handle('alarms:list', () => reminderStats());
+
+  ipcMain.handle('alarms:parse', (_event, payload) => {
+    const text = String((payload && payload.text) || '');
+    const parsed = parseSchedule(text, new Date());
+    return {
+      ok: Boolean(parsed.ok),
+      reason: parsed.reason || '',
+      dueAt: parsed.dueAt || 0,
+      allDay: Boolean(parsed.allDay),
+      suggestedAt: parsed.ok ? parsed.dueAt : Date.now() + 10 * 60000
+    };
+  });
+
+  ipcMain.handle('alarms:create', (_event, payload) => {
+    const data = payload || {};
+    if (!data.messageId) return { ok: false, error: '请选择一条日程消息' };
+    if (!data.dueAt) return { ok: false, error: '缺少提醒时间' };
+    return createReminderFromMessage(String(data.messageId), {
+      dueAt: Number(data.dueAt),
+      advanceMin: data.advanceMin != null ? Number(data.advanceMin) : undefined,
+      title: data.title
+    });
+  });
+
+  ipcMain.handle('alarms:update', (_event, payload) => {
+    const data = payload || {};
+    const id = String(data.id || '');
+    const patch = {};
+    if (data.dueAt != null) patch.dueAt = Number(data.dueAt);
+    if (data.advanceMin != null) patch.advanceMin = Math.max(0, Number(data.advanceMin));
+    if (typeof data.title === 'string') patch.title = data.title.slice(0, 200);
+    if (['pending', 'fired', 'done', 'canceled'].includes(data.status)) {
+      patch.status = data.status;
+      if (data.status === 'pending') patch.firedAt = 0;
+    }
+    const updated = store.updateReminder(id, patch);
+    if (updated) notifyReminderChange(updated);
+    return { ok: Boolean(updated), reminder: updated };
+  });
+
+  ipcMain.handle('alarms:remove', (_event, payload) => {
+    const id = String((payload && payload.id) || '');
+    const removed = store.removeReminder(id);
+    notifyReminderChange(null);
+    return { ok: removed };
+  });
+
+  ipcMain.handle('alarms:snooze', (_event, payload) => {
+    const data = payload || {};
+    const id = String(data.id || '');
+    const minutes = Math.max(1, Math.min(24 * 60, Number(data.minutes) || 5));
+    const reminder = store.getReminder(id);
+    if (!reminder) return { ok: false, error: '闹钟不存在' };
+    const dueAt = Math.max(Number(reminder.dueAt) + minutes * 60000, Date.now() + minutes * 60000);
+    const updated = store.updateReminder(id, { status: 'pending', dueAt, firedAt: 0, snoozedAt: Date.now() });
+    notifyReminderChange(updated);
+    return { ok: true, reminder: updated };
+  });
+
+  ipcMain.handle('alarms:done', (_event, payload) => {
+    const id = String((payload && payload.id) || '');
+    const updated = store.updateReminder(id, { status: 'done', doneAt: Date.now() });
+    notifyReminderChange(updated);
+    return { ok: Boolean(updated), reminder: updated };
+  });
+
   ipcMain.handle('msgs:clear', () => {
     store.clearHistory();
     sendEvent({ type: 'messages:reset' });
@@ -1567,6 +1824,7 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
       registerGlobalHotkey();
     }
     applyAutoLaunch();
+    startReminderTimer();
 
     const cfg = config().source || {};
     if (hasFlag('demo') || cfg.demoMode || (IS_SHOT && !hasFlag('no-demo'))) {
@@ -1615,6 +1873,10 @@ if (!IS_SHOT && !app.requestSingleInstanceLock()) {
       if (hotkeyRegistered) globalShortcut.unregisterAll();
     } catch (_err) {
       /* noop */
+    }
+    if (reminderTimer) {
+      clearInterval(reminderTimer);
+      reminderTimer = null;
     }
     stopControlServer();
     if (demo) demo.stop();

@@ -38,6 +38,15 @@ contextBridge.exposeInMainWorld('we', {
   // AI 辅助
   testAI: () => ipcRenderer.invoke('ai:test'),
 
+  // 日程闹钟
+  listAlarms: () => ipcRenderer.invoke('alarms:list'),
+  parseAlarmText: (text) => ipcRenderer.invoke('alarms:parse', { text }),
+  createAlarm: (payload) => ipcRenderer.invoke('alarms:create', payload),
+  updateAlarm: (payload) => ipcRenderer.invoke('alarms:update', payload),
+  removeAlarm: (id) => ipcRenderer.invoke('alarms:remove', { id }),
+  snoozeAlarm: (id, minutes) => ipcRenderer.invoke('alarms:snooze', { id, minutes }),
+  doneAlarm: (id) => ipcRenderer.invoke('alarms:done', { id }),
+
   // 应用
   openDataDir: () => ipcRenderer.invoke('app:openpath'),
   openExternal: (url) => ipcRenderer.invoke('app:openexternal', { url }),

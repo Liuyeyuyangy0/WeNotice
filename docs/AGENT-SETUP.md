@@ -15,7 +15,7 @@
 - 检测软件是否安装、进程是否在跑、端口是否监听（只读）。
 - 启动/重启 WeNotice、AstrWeChat、NapCat（不涉及登录态）。
 - 读取 `%APPDATA%\weflow\WeFlow-config.json`、`%APPDATA%\weflow\bridge\config.json`（只读；需要把内容写进报告时对 token/密钥打码）。
-- 在人工已确认 AstrWeChat 已连上微信后：**自动完成本地 API 开启、Token 读取/校验/写入**（详见 2.3 / 2.4；优先让 WeNotice 自己「自动读取」或「一键开启」，也可按 2.3-B 直接改 AstrWeChat 配置后重启）。
+- 在人工已确认 AstrWeChat 已连上微信后：**自动完成本地 API 开启、Token 读取/校验/写入**（详见 2.3 / 2.4；优先让 WeNotice 自己「自动读取」或「一键开启」）。
 - 改 WeNotice 自己的配置（`<WeNotice 数据目录>\data\config.json`）、拉 QQ WebSocket 配置、跑验证清单。
 
 ### Agent 禁止做的事（必须停下来让人类操作）
@@ -97,7 +97,7 @@ Get-Content "$env:APPDATA\weflow\logs\wcdb.log" -Tail 30 | Select-String 'open s
 | 现象 | 结论 | 下一步 |
 | --- | --- | --- |
 | `dbPath`/`myWxid` 空 | 2.1 没做完 | 请人类回去完成「微信连接」 |
-| `decryptKey` 为 `lock:` 开头 | 口令模式，WeNotice/Agent 无法解码 **Token**（解密密钥本身也必须由人类处理） | Token 按 2.3-B 重写明文后重启；解密密钥请人类在 AstrWeChat 里重走 2.1 |
+| `decryptKey` 为 `lock:` 开头 | 口令模式，WeNotice/Agent 无法解码 **Token**（解密密钥本身也必须由人类处理） | 请人类在 AstrWeChat 里重走 2.1，然后按 2.3-A 重开 API |
 | 日志没有 `open succeeded` | 密钥/版本不匹配 | 确认微信版本，重走 2.1；不要自己填 key |
 | 全部正常 | 继续 2.3 | — |
 
@@ -107,39 +107,12 @@ Get-Content "$env:APPDATA\weflow\logs\wcdb.log" -Tail 30 | Select-String 'open s
 
 **A. 用 WeNotice「一键开启 AstrWeChat API」（最省事）**
 WeNotice → 设置 → 数据源 → 「**一键开启 AstrWeChat API**」。这个按钮会自动完成：
-备份 AstrWeChat 配置 → 停止 AstrWeChat → 写入 `httpApiEnabled=true`、`messagePushEnabled=true`、`httpApiToken`（32 位 hex 明文）→ 重启 AstrWeChat → 等 `/health` → 自动读取并校验 Token。
+备份 AstrWeChat 配置 → 停止 AstrWeChat → 开启 API 服务 / 主动推送并生成本地 Token → 重启 AstrWeChat → 等 `/health` → 自动读取并校验 Token。
 Agent 可用界面自动化点它；点完后 WeNotice 会自动重连。
 
-**B. 直接改 AstrWeChat 配置并重启（纯命令行，最适合 Agent）**
+**B. 若按钮不可用**：先按 2.3-A 重试一次；仍不行时打开 AstrWeChat → 左侧「Bridge」→「启动 AstrWeChat / 保存并启动」。
 
-```powershell
-$wf  = "$env:APPDATA\weflow\WeFlow-config.json"
-$cfg = Get-Content $wf -Raw | ConvertFrom-Json
-$cfg.httpApiEnabled   = $true
-$cfg.messagePushEnabled = $true
-$cfg.httpApiPort = 5031
-$cfg.httpApiHost = '127.0.0.1'
-if (-not $cfg.httpApiToken) {
-  $cfg.httpApiToken = -join (1..32 | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
-}
-Copy-Item $wf "$wf.wenotice-bak" -Force
-$cfg | ConvertTo-Json -Depth 8 | Set-Content $wf -Encoding UTF8
-
-# AstrWeChat 运行时会缓存配置：必须先退出再改、再启动
-Stop-Process -Name AstrWeChat -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
-Start-Process 'C:\Program Files\astrwechat\AstrWeChat.exe'
-
-# 最多等 45 秒 health
-$ok = $false
-1..45 | ForEach-Object {
-  Start-Sleep -Seconds 1
-  try { if ((Invoke-RestMethod 'http://127.0.0.1:5031/health').status -eq 'ok') { $ok = $true; return } } catch { }
-}
-if (-not $ok) { throw 'AstrWeChat API 未在 45s 内就绪' }
-```
-
-> 改前必须备份；AstrWeChat 退出时会把内存配置写盘，所以顺序一定是「先退出 → 改文件 → 再启动」。
+> 注意：不要手工改 AstrWeChat 的配置文件，AstrWeChat 退出时会回写内存配置，手工改动容易与它自身的配置同步冲突。
 
 **C. AstrWeChat Bridge 页**（需要 UI）：左侧「Bridge」→ 点「启动 AstrWeChat / 保存并启动」，会顺带开启 API 与主动推送并生成 Token。
 （AstrWeChat 1.5.0 **没有**「设置 → API 服务」页，不用找。）
@@ -156,9 +129,9 @@ if ($cfg.httpApiToken -notlike 'safe:*' -and $cfg.httpApiToken) {
 # safe: 加密存储时不要自己解；交给 WeNotice 自动读取（2.4）
 ```
 
-- `/health` 非 ok = API 没起来 → 重做 2.3-A/B。
+- `/health` 非 ok = API 没起来 → 重做 2.3-A。
 - `/api/v1/sessions` 200 = Token 有效且数据库已连。
-- 401 = Token 不一致 → 重做 2.3-B。
+- 401 = Token 不一致 → 重做 2.3-A。
 - 500 `请先在设置页面配置微信ID` = 2.1 还没完成。
 
 ### 2.4 Token 自动处理（人类不参与；Agent 按此执行）
@@ -193,7 +166,7 @@ if ($cfg.httpApiToken -notlike 'safe:*' -and $cfg.httpApiToken) {
 
    最终以界面状态为准：状态栏显示 `数据源: AstrWeChat · 已连接`、顶部胶囊为「已连接」。
 
-4. **读不出 Token 时的唯一正解**：重做 **2.3-B**（把 `httpApiToken` 重写成明文）→ 重启 AstrWeChat → 重启 WeNotice。
+4. **读不出 Token 时**：按 **2.3-A** 用 WeNotice 一键开启 API，再重连；仍失败时导出诊断信息发给维护者。
    不要让人工复制 Token，也不要把 Token 写到聊天/日志里。
 
 5. （可选）本机校验 `safe:` Token 的 DPAPI 片段——只在内存里用，禁止输出：
@@ -290,8 +263,8 @@ Agent 输出报告时：Token/密钥一律打码（保留前 4 位 + 长度）�
 | 症状 | 根因 | 处理 |
 | --- | --- | --- |
 | WeNotice 显示「连接异常：AstrWeChat 尚未完成微信连接」 | 2.1 未完成 | 请人类走「微信连接」 |
-| 「AstrWeChat 把 Token 加密保存了，但本机解不开」 | `lock:` 口令模式 / 跨机复制配置 | 按 **2.3-B** 把 Token 重写为明文后重启；不要跨机复制 `%APPDATA%\weflow` |
-| Token 要在 AstrWeChat 与 WeNotice 之间「传递」 | 人类复制粘贴易出错（漏字符、截断、贴错配置） | **不要人工传递**：按 2.4 让 WeNotice 自动读取+校验；读不出就按 2.3-B 重写 |
+| 「AstrWeChat 把 Token 加密保存了，但本机解不开」 | `lock:` 口令模式 / 跨机复制配置 | 按 **2.3-A** 用 WeNotice 一键开启；不要跨机复制 `%APPDATA%\weflow` |
+| Token 要在 AstrWeChat 与 WeNotice 之间「传递」 | 人类复制粘贴易出错（漏字符、截断、贴错配置） | **不要人工传递**：按 2.4 让 WeNotice 自动读取+校验；读不出就按 2.3-A 重开 |
 | Bridge 启动失败 `Python was not found ... 退出码 9009` | PATH 上的 python 是 Microsoft Store 存根 | Bridge 与 WeNotice 无关，可忽略；要修 Bridge 用 `tools/fix-astr-bridge.ps1`（仅本机修复路径已验证） |
 | `Python 3.15.1` 报缺 `requests` | Bridge 用系统 Python 且没装依赖 | 同上；或装 3.12 并 `pip install -r resources\bridge\requirements.txt` |
 | 「无法连接 AstrBot」 | Bridge 的 AstrBot 地址/服务没起 | Bridge 可选功能，不影响 WeNotice 通知 |

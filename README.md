@@ -68,7 +68,7 @@
 - 消息先经过**规则引擎**：`系统事件 → 自己发送 → 静音会话 → 用户规则（按优先级）→ 重点会话 → 内置词库识别`
 - 判定结果三档：`notify`（弹桌面通知 + 进通知中心）、`list`（只进通知中心）、`ignore`（只在「全部消息」）
 - 内置识别覆盖 12 类：公告通知、@我/全员、安全验证、交易财务、物流快递、日程安排、工作事务、文件、链接、系统消息、普通聊天、自定义
-- **可选：QQ 消息源（v1.2.0+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
+- **可选：QQ 消息源（WeNotice v1.3.0+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
 
 ---
 
@@ -133,7 +133,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 4. **开启 AstrWeChat 本地 API**（AstrWeChat 1.5.0 没有独立的「设置 → API 服务」页）：
    - 推荐：打开 WeNotice → 设置 → 数据源 → 点 **「一键开启 AstrWeChat API」**，它会自动写入 AstrWeChat 配置（开启 API 服务 + 主动推送）并重启 AstrWeChat，然后自动读取 Token；
    - 手动：AstrWeChat → 左侧 **「Bridge」页** → 点「启动 AstrWeChat / 保存并启动」，该流程会一并开启 API 服务与主动推送并生成 Access Token（端口默认 `http://127.0.0.1:5031`）。
-   > Token 不需要手动复制：WeNotice 默认会自动读取 `%APPDATA%\weflow\WeFlow-config.json` 里的 `httpApiToken`。该字段可能是 AstrWeChat 用系统加密保存的 `safe:...` 形式，WeNotice 会先解密再使用，并在写入前用 `/api/v1/sessions` 校验，避免覆盖能用 Token。解密失败时会给出提示（此时点「一键开启 AstrWeChat API」可让 AstrWeChat 重新生成明文 Token）。
+   > Token 不需要手动复制：WeNotice 默认会自动读取 `%APPDATA%\weflow\WeFlow-config.json` 里的 `httpApiToken`。该字段可能是 AstrWeChat 用系统加密保存的 `safe:...` 形式，WeNotice 会先解密再使用，并在写入前用 `/api/v1/sessions` 校验，避免覆盖能用 Token。解密失败时会给出提示，此时点「一键开启 AstrWeChat API」即可自动修复。
 5. 打开 WeNotice（会自动拉起并等待 AstrWeChat 的 API）→ 右上角齿轮「设置」→ 数据源：
    - API 地址：`http://127.0.0.1:5031`
    - Access Token：点「自动读取」（或粘贴 Token）
@@ -192,6 +192,7 @@ pwsh -File tools\setup-napcat.ps1 -InstallDir C:\Users\<你>\NapCat -Repair
 - **详情面板**：分类、会话、发送者、命中原因、AI 摘要、原始 JSON、收藏/忽略/标记已读/复制
 - **规则引擎**：内置 12 类词库 + 5 个一键示例模板；自定义规则支持关键词/正则/发送者/会话/范围（全部、群聊、私聊、公众号、服务号）与 5 种动作（桌面提醒、只列表、忽略、收藏、必须提醒）
 - **通知策略**：免打扰时段（支持跨零点）、同会话合并窗口、每分钟频率上限、仅重要分类、提示音、通知点击直达消息并自动标记已读
+- **日程闹钟**：自动识别通知里的时间（`明天下午3点`、`本周五 15:00`、`11月1日 19:30` 等）并在到点时提醒；侧栏「日程闹钟」统一管理（稍后提醒 / 完成 / 删除）；消息详情可手动「设为闹钟」；历史回填消息不触发闹钟，可在设置关闭自动识别
 - **首次使用向导**：首次启动引导「演示体验 → 连接 AstrWeChat → 开启 API → 测试连接」，可从 设置 → 应用 → 新手引导 再次打开
 - **一键开启 AstrWeChat API**：设置 → 数据源 点一下，自动写入 AstrWeChat 配置（开启 API 服务 + 主动推送）并重启它，再自动读取 Token——不用再找 AstrWeChat 里藏起来的开关
 - **Token 自动读取**：连接前自动从 `%APPDATA%\weflow\WeFlow-config.json` 读取 AstrWeChat 的 API Token（包含 `safe:` 系统加密形式会自动解密，且先用 `/api/v1/sessions` 校验有效才写入），AstrWeChat 重启换 Token 也无需手动复制（设置里可关闭或手动覆盖）
@@ -236,6 +237,9 @@ pwsh -File tools\setup-napcat.ps1 -InstallDir C:\Users\<你>\NapCat -Repair
 ---
 
 ## 8. 常见问题
+
+**Q: 日程闹钟是怎么来的？能关吗？**
+A: 收到日程类通知（群公告、会议、报名截止等）时，WeNotice 会用本地规则解析其中的时间并自动建闹钟，到点弹窗 + 提示音（可在设置 → 日程闹钟关闭自动识别、改默认提前量）。历史回填的消息不会补建闹钟；任意消息详情里也能手动「设为闹钟」。
 
 **Q：测试连接失败 / 401？** A：确认 AstrWeChat 已启动且 API 服务开启（**注意：AstrWeChat 1.5.0 没有「设置 → API 服务」页，开关在左侧「Bridge」页**）；新版会自动读取 AstrWeChat 配置里的 Token（设置 → 数据源 → 「自动读取 Token」），也可以点输入框旁的「自动读取」按钮手动同步；确认端口 5031 没被占用。如果提示「Token 加密无法解密」，说明 AstrWeChat 用系统加密/口令模式保存了 Token：打开 AstrWeChat → Bridge → 启动 AstrWeChat，再点「自动读取」，或手动复制 Token 粘贴。
 

@@ -60,6 +60,16 @@ const DEFAULT_CONFIG = {
   filters: {
     muteSessions: [],
     alwaysSessions: []
+  },
+  schedule: {
+    // 日程闹钟
+    enabled: true,
+    // 收到日程类消息时自动识别时间并创建闹钟
+    autoCreate: true,
+    // 默认提前提醒分钟数（0 = 准时提醒）
+    advanceMin: 10,
+    // 闹钟提醒是否播放系统提示音（依赖桌面通知）
+    sound: true
   }
 };
 
@@ -84,9 +94,11 @@ class Store {
     this.configPath = path.join(dataDir, 'config.json');
     this.rulesPath = path.join(dataDir, 'rules.json');
     this.historyPath = path.join(dataDir, 'history.json');
+    this.remindersPath = path.join(dataDir, 'reminders.json');
     this.config = clone(DEFAULT_CONFIG);
     this.rules = [];
     this.history = [];
+    this.reminders = [];
     this._saveTimer = null;
     ensureDir(dataDir);
   }
@@ -100,6 +112,8 @@ class Store {
     this.rules = Array.isArray(rulesRaw) ? rulesRaw : [];
     const historyRaw = readJson(this.historyPath, []);
     this.history = Array.isArray(historyRaw) ? historyRaw.filter((m) => m && typeof m.id === 'string' && !m.isDemo) : [];
+    const remindersRaw = readJson(this.remindersPath, []);
+    this.reminders = Array.isArray(remindersRaw) ? remindersRaw.filter((r) => r && typeof r.id === 'string') : [];
     return this;
   }
 
@@ -163,6 +177,48 @@ class Store {
     return before - this.history.length;
   }
 
+  // ---------------------------------------------------------------- 日程闹钟
+  getReminder(id) {
+    return this.reminders.find((r) => r.id === id) || null;
+  }
+
+  addReminder(reminder) {
+    if (!reminder || !reminder.id) return null;
+    const existing = this.reminders.find((r) => r.messageId && r.messageId === reminder.messageId);
+    if (existing) return existing;
+    this.reminders.push(reminder);
+    this.reminders.sort((a, b) => Number(a.dueAt) - Number(b.dueAt));
+    this.scheduleFlush();
+    return reminder;
+  }
+
+  updateReminder(id, patch) {
+    const target = this.getReminder(id);
+    if (!target) return null;
+    Object.assign(target, patch || {});
+    this.reminders.sort((a, b) => Number(a.dueAt) - Number(b.dueAt));
+    this.scheduleFlush();
+    return target;
+  }
+
+  removeReminder(id) {
+    const before = this.reminders.length;
+    this.reminders = this.reminders.filter((r) => r.id !== id);
+    if (this.reminders.length !== before) this.scheduleFlush();
+    return before !== this.reminders.length;
+  }
+
+  findReminderByMessage(messageId) {
+    return this.reminders.find((r) => r.messageId === messageId) || null;
+  }
+
+  clearDemoReminders() {
+    const before = this.reminders.length;
+    this.reminders = this.reminders.filter((r) => !r.isDemo);
+    if (this.reminders.length !== before) this.scheduleFlush();
+    return before - this.reminders.length;
+  }
+
   scheduleFlush() {
     if (this._saveTimer) return;
     this._saveTimer = setTimeout(() => {
@@ -178,6 +234,7 @@ class Store {
     }
     try {
       writeJson(this.historyPath, this.history.filter((m) => !m.isDemo));
+      writeJson(this.remindersPath, this.reminders.filter((r) => !r.isDemo));
     } catch (err) {
       console.error('[store] 历史写入失败:', err.message);
     }
