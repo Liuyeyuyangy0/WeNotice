@@ -1,0 +1,29 @@
+name: CI
+
+# 每次 push main / PR 只做检查：不构建、不发版。
+# 发版流程见 docs/RELEASE-PROCESS.md：预发布用 tag vX.Y.Z-beta.N，正式版用 tag vX.Y.Z。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Release gate (pre)
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools/check-release.ps1 -Stage pre

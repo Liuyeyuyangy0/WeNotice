@@ -314,6 +314,7 @@ WeNotice/
 │  ├─ fix-astr-bridge.ps1   AstrWeChat Bridge 的 Python 运行时修复 / 离线依赖包（可选、实验性）
 │  ├─ launcher.cs           WeNotice.exe 启动器源码（C#，csc 编译）
 │  ├─ build-portable.ps1    便携版打包脚本
+│  ├─ check-release.ps1     发布检查（pre：语法/版本/CHANGELOG；post：zip/sha256/签名）
 │  ├─ gen-icons.py          应用图标生成（Pillow）
 │  ├─ gen-tray-icon.py      托盘图标生成（Pillow，高对比度版）
 │  ├─ electron-dist/        Electron 运行时（自行下载，不入库）
@@ -321,6 +322,8 @@ WeNotice/
 ├─ docs/screenshots/        界面截图
 ├─ docs/TRAY.md             托盘图标实现与排障记录（启动器托管托盘、全局快捷键兜底）
 ├─ docs/AGENT-SETUP.md      给 AI Agent 的自动配置指南（微信源 + QQ 源，含人工确认边界）
+├─ docs/RELEASE-PROCESS.md  发布流程（CI 检查 / beta 预发布 / 正式版，验收后再发版）
+├─ .github/workflows/       ci.yml（每次提交只检查）与 release.yml（tag 触发构建/发布）
 ├─ dist/WeNotice/           便携版产物（运行 build-portable.ps1 生成，不入库）
 ├─ build/                   临时构建/截图/测试数据（不入库，可删除）
 ├─ LICENSE                  MIT
@@ -345,6 +348,13 @@ powershell -ExecutionPolicy Bypass -File tools\build-portable.ps1
 
 > 打包脚本 6 步：编译 C# 启动器 → 清理 dist → 复制 Electron 运行时（保持 electron.exe 原名）→
 > 复制 app 到 `resources\app` → 删除 `default_app.asar` → 写入 `WeNotice.exe`、`version.txt`、`README.md`。
+
+**发布流程（详细见 [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md)）：**
+
+- 日常提交：push `main` 后 CI 只做检查（`tools/check-release.ps1 -Stage pre`：语法/版本号/CHANGELOG），**不构建、不发版**；
+- 需要用户验收：打 tag `vX.Y.Z-beta.N` → CI 构建并创建 **Pre-release**（不占 Latest）；
+- 验收通过后：打正式 tag `vX.Y.Z` → CI 构建并创建正式 Release；
+- 本地完整检查：先 `-Stage pre`，构建并签名后 `-Stage post`（zip/sha256/签名）。
 
 **规则引擎自测：**
 
