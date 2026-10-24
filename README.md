@@ -68,7 +68,7 @@
 - 消息先经过**规则引擎**：`系统事件 → 自己发送 → 静音会话 → 用户规则（按优先级）→ 重点会话 → 内置词库识别`
 - 判定结果三档：`notify`（弹桌面通知 + 进通知中心）、`list`（只进通知中心）、`ignore`（只在「全部消息」）
 - 内置识别覆盖 12 类：公告通知、@我/全员、安全验证、交易财务、物流快递、日程安排、工作事务、文件、链接、系统消息、普通聊天、自定义
-- **可选：QQ 消息源（WeNotice v1.3.0+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
+- **可选：QQ 消息源（WeNotice v1.3.1+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
 
 ---
 
@@ -237,6 +237,9 @@ pwsh -File tools\setup-napcat.ps1 -InstallDir C:\Users\<你>\NapCat -Repair
 ---
 
 ## 8. 常见问题
+
+**Q: 点「一键开启 AstrWeChat API」提示无法关闭 AstrWeChat？**
+A: 说明 AstrWeChat 正在以管理员权限运行。任选其一：① 托盘右键退出 AstrWeChat（或任务管理器结束），回到 WeNotice 再点一次；② 设置 → 应用 →「以管理员身份重启」提权重启 WeNotice 后再点。注意：WeNotice 启动时只**读取**已保存的 Token，不会主动改 Token；想换新 Token 请点「一键开启」。
 
 **Q: 日程闹钟是怎么来的？能关吗？**
 A: 收到日程类通知（群公告、会议、报名截止等）时，WeNotice 会用本地规则解析其中的时间并自动建闹钟，到点弹窗 + 提示音（可在设置 → 日程闹钟关闭自动识别、改默认提前量）。历史回填的消息不会补建闹钟；任意消息详情里也能手动「设为闹钟」。

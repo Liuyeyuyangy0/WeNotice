@@ -614,7 +614,14 @@ async function enableAstrApi() {
     if (await AstrWechat.isRunning()) {
       push('AstrWeChat 正在运行，先停止它以写入 API 配置（约 3 秒）…');
       const stopped = await AstrWechat.stopAstrWechat();
-      if (!stopped.ok) return fail(stopped.error || '停止 AstrWeChat 失败');
+      if (!stopped.ok) {
+        return Object.assign(fail(stopped.error || '停止 AstrWeChat 失败'), {
+          needElevation: Boolean(stopped.elevated),
+          hint: stopped.elevated
+            ? 'AstrWeChat 以管理员权限运行，普通权限的 WeNotice 无法结束它。可以：① 托盘右键退出 AstrWeChat 后再点一次；② 设置 → 应用 → 「以管理员身份重启 WeNotice」，重启后再点。'
+            : '请手动退出 AstrWeChat 后再点一次「一键开启 AstrWeChat API」。'
+        });
+      }
       push('AstrWeChat 已停止');
     }
 
@@ -659,6 +666,34 @@ async function enableAstrApi() {
     return { ok: true, already: false, token, apiEnabled: true, log };
   } catch (err) {
     return fail(err.message || String(err));
+  }
+}
+
+/**
+ * 以管理员身份重新启动 WeNotice（用于需要结束以管理员权限运行的 AstrWeChat 的场景）。
+ * 会先退出当前实例，再通过 PowerShell Start-Process -Verb RunAs 拉起打包版启动器（会弹 UAC）。
+ */
+async function relaunchElevated() {
+  if (!app.isPackaged) return { ok: false, error: '开发模式下不支持以管理员身份重启' };
+  const dir = path.dirname(process.execPath);
+  const launcher = path.join(dir, 'WeNotice.exe');
+  if (!fs.existsSync(launcher)) {
+    return { ok: false, error: '未找到启动器 WeNotice.exe（便携版应位于 electron.exe 同目录）' };
+  }
+  try {
+    const { spawn } = require('child_process');
+    const escaped = launcher.replace(/'/g, "''");
+    const script = `Start-Sleep -Milliseconds 1200; Start-Process -FilePath '${escaped}' -Verb RunAs`;
+    spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', script], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    }).unref();
+    bootLog('relaunch elevated: requested via UAC');
+    setTimeout(() => app.quit(), 500);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
   }
 }
 
@@ -1627,6 +1662,8 @@ function registerIpc() {
     await shell.openExternal(url);
     return { ok: true };
   });
+
+  ipcMain.handle('app:relaunch-elevated', async () => relaunchElevated());
 
   ipcMain.handle('cfg:astr-token', async () => {
     const astr = readAstrConfig();

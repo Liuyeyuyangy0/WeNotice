@@ -1416,13 +1416,13 @@ function closeModal() {
   if (hadFocus) renderDetail();
 }
 
-function confirmModal(message, { okText = '确认', danger = true } = {}) {
+function confirmModal(message, { okText = '确认', danger = true, cancelText = '取消' } = {}) {
   return new Promise((resolve) => {
     openModal({
       title: '请确认',
       size: 'is-sm',
-      body: `<p style="font-size:12.5px;line-height:1.7;color:var(--text-2)">${escapeHtml(message)}</p>`,
-      footer: `<button class="btn btn-ghost" data-confirm="0">取消</button>
+      body: `<p style="font-size:12.5px;line-height:1.7;color:var(--text-2);white-space:pre-wrap">${escapeHtml(message)}</p>`,
+      footer: `<button class="btn btn-ghost" data-confirm="0">${escapeHtml(cancelText)}</button>
                <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-confirm="1">${escapeHtml(okText)}</button>`
     });
     refs.modalRoot.querySelectorAll('[data-confirm]').forEach((btn) => {
@@ -1614,6 +1614,7 @@ function settingsBody() {
       <button class="btn btn-sm" id="setOpenData">打开数据目录</button>
       <button class="btn btn-sm" id="setOnboarding">新手引导</button>
       <button class="btn btn-sm" id="setExportDiag">导出诊断信息</button>
+      <button class="btn btn-sm" id="setRelaunchElevated">以管理员身份重启</button>
       <button class="btn btn-sm btn-danger" id="setClearHistory">清空全部历史</button>
     </div>
   `;
@@ -1758,7 +1759,18 @@ function openSettingsModal() {
         await window.we.reconnect();
       } else {
         const detail = result && result.log && result.log.length ? `（${result.log[result.log.length - 1]}）` : '';
-        toast(`${(result && result.error) || '开启失败'}${detail}`, 'err', 7000);
+        toast(`${(result && result.hint) || (result && result.error) || '开启失败'}${detail}`, 'err', 9000);
+        if (result && result.needElevation) {
+          const restart = await confirmModal(
+            'AstrWeChat 正在以管理员权限运行，普通权限的 WeNotice 无法结束它。\n\n是否以管理员身份重新启动 WeNotice？（会弹出 UAC 确认框；重启后再点一次「一键开启 AstrWeChat API」即可；也可以现在手动退出 AstrWeChat 后重试）',
+            { okText: '以管理员重启', cancelText: '先不重启' }
+          );
+          if (restart) {
+            const r = await window.we.relaunchElevated();
+            if (r && r.ok) toast('正在以管理员身份重启 WeNotice…', 'ok', 4000);
+            else toast(`重启失败：${(r && r.error) || '未知错误'}`, 'err', 6000);
+          }
+        }
       }
     } catch (err) {
       toast(`开启失败：${err.message}`, 'err', 6000);
@@ -1781,6 +1793,17 @@ function openSettingsModal() {
   $('#setOnboarding').addEventListener('click', () => {
     closeModal();
     setTimeout(() => openOnboardingModal(), 60);
+  });
+
+  $('#setRelaunchElevated').addEventListener('click', async () => {
+    const ok = await confirmModal(
+      '将以管理员身份重新启动 WeNotice（会弹出 UAC 确认框）。\n\n适用场景：AstrWeChat 以管理员权限运行，导致「一键开启 API」无法自动结束它。',
+      { okText: '重启并提权', cancelText: '取消' }
+    );
+    if (!ok) return;
+    const result = await window.we.relaunchElevated();
+    if (result && result.ok) toast('正在以管理员身份重启 WeNotice…', 'ok', 4000);
+    else toast(`重启失败：${(result && result.error) || '未知错误'}`, 'err', 6000);
   });
 
   $('#setTestAI').addEventListener('click', async () => {

@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('we', {
   openDataDir: () => ipcRenderer.invoke('app:openpath'),
   openExternal: (url) => ipcRenderer.invoke('app:openexternal', { url }),
   exportDiagnostics: () => ipcRenderer.invoke('app:diagnostics'),
+  relaunchElevated: () => ipcRenderer.invoke('app:relaunch-elevated'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
   // 窗口控制
