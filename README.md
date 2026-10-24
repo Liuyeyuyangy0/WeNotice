@@ -152,6 +152,27 @@ $env:ELECTRON_RUN_AS_NODE = $null
 
 WeNotice 不实现 QQ 登录协议，而是作为 **OneBot 11 WebSocket 客户端**，连接本机运行的 QQ 协议端**只读接收**消息（不发消息，不用 QQ 账号跑机器人指令）。推荐协议端：[NapCatQQ](https://github.com/NapNeko/NapCatQQ)（基于 NTQQ，活跃维护，自带 OneBot 11 WebSocket 服务端）。
 
+### 4.1.1 一键安装（推荐，Windows）
+
+仓库自带 `tools\setup-napcat.ps1`，把便携 QQ + NapCat + 注入器 + 启动脚本一次性配好，避开常见坑（NapCat 包被截断、bat 换行符错误、注入器版本不匹配、QQ 报「文件已损坏」等）：
+
+```powershell
+# 联网一键安装（默认装到 %USERPROFILE%\NapCat，自动下载 QQ 与 NapCat）
+pwsh -File tools\setup-napcat.ps1
+
+# 已有本地安装包时（离线/复用，避免重复下载 300MB+）
+pwsh -File tools\setup-napcat.ps1 -QQInstaller .\QQ.exe -NapCatZip .\NapCat.Shell.zip -SevenZip .\7z.exe
+
+# 只修复已有安装（重写 bat、同步注入器、修复 package.json、写 WebUI 配置）
+pwsh -File tools\setup-napcat.ps1 -InstallDir C:\Users\<你>\NapCat -Repair
+```
+
+脚本会生成 `napcat.bat`（自动请求管理员权限）和桌面快捷方式「启动 NapCat（管理员）」；双击后扫码登录，按提示在 NapCat WebUI 添加 WebSocket 服务器 `127.0.0.1:3001`，然后回到 WeNotice 开启 QQ 数据源即可。**不需要每次重装**，之后重新登录只需双击快捷方式（或用 `napcat.quick.bat` 快速登录）。
+
+> 注意：NapCat 是协议端登录，**同一 QQ 账号登录后，电脑端 QQ 会被挤下线**（与微信协议登录一样）。WeNotice 读取微信之所以不掉线，是因为 AstrWeChat 走的是「本地数据库解密」而不是登录协议。建议用一个小号专门跑 NapCat，或关注后续实验性的「QQ 本地数据库只读」数据源（不登录、只读本机记录，见 4.1.2）。
+
+### 4.1.2 手动安装（可选）
+
 1. 安装并登录 NapCatQQ（它基于 Windows QQNT 客户端；按 NapCat 官方文档安装/启动，首次扫码登录）。
 2. 在 NapCat 里开启 **「WebSocket 服务器」**（NapCat WebUI → 网络配置 → 添加 WebSocket 服务器），默认地址 `ws://127.0.0.1:3001`；如果设置了 Token，记下来。
 3. 打开 WeNotice → 设置 → 「QQ 数据源 · OneBot 11」→ 打开「启用 QQ 消息接收」→ 填 OneBot WebSocket 地址（默认 `ws://127.0.0.1:3001`）和 Token（如有）→ 点「测试连接」。
@@ -239,7 +260,11 @@ WeNotice 不实现 QQ 登录协议，而是作为 **OneBot 11 WebSocket 客户�
 
 **Q：会封号吗？** A：WeNotice 不注入微信、不模拟登录，只读 AstrWeChat 解密后的本地数据；风险主要来自 AstrWeChat 读取数据库本身，以及微信对第三方读取的打击态度。
 
-**Q：怎么接 QQ 消息？** A：WeNotice 不自带 QQ 协议，需要先在本机跑一个 OneBot 11 协议端，推荐 NapCatQQ（基于 Windows QQNT）。步骤：装好 NapCat 并扫码登录 → NapCat WebUI 里开启「WebSocket 服务器」（默认 `ws://127.0.0.1:3001`）→ WeNotice 设置 → 「QQ 数据源 · OneBot 11」→ 启用并填地址/Token → 测试连接。详细步骤见 §4.1。WeNotice 只读接收，不会向 QQ 发消息。
+**Q：怎么接 QQ 消息？** A：WeNotice 不自带 QQ 协议，需要先在本机跑一个 OneBot 11 协议端，推荐 NapCatQQ（基于 Windows QQNT）。最省事的做法是用仓库自带的一键脚本 `tools\setup-napcat.ps1`（见 §4.1.1，实测从零安装/修复都能跑通）。手动步骤：装好 NapCat 并扫码登录 → NapCat WebUI 里开启「WebSocket 服务器」（默认 `ws://127.0.0.1:3001`）→ WeNotice 设置 → 「QQ 数据源 · OneBot 11」→ 启用并填地址/Token → 测试连接。详细步骤见 §4.1。WeNotice 只读接收，不会向 QQ 发消息。
+
+**Q：接 QQ 会不会让我的 QQ 掉线？能不能像微信一样不影响正常登录？** A：会。NapCat 属于「协议端登录」——同一个 QQ 账号在 NapCat 登录后，电脑端 QQ 会被挤下线，这是 QQ 协议机制决定的，不是 WeNotice 造成的。微信这边之所以不影响（AstrWeChat 走本地数据库解密，只读文件），是因为微信数据库可以用密钥在本地解密；QQ 也有等价的「本地数据库只读」路线（社区项目如 `qq-win-db-key` / `QQDecrypt` 提供密钥提取与解密脚本），但目前没有成熟的实时 API 服务，而且需要管理员权限、逆向能力和定期适配 QQ 版本，因此 WeNotice 暂未内置。可选做法：①把 NapCat 登录用的 QQ 换成**小号**（推荐，最稳）；②等后续实验性的 QQ 本地数据库只读数据源（不登录、不注入、只读本机记录，代价是延迟和兼容性）。
+
+**Q：NapCat 装起来太麻烦，每次都要重新解压/修 bat？** A：不用。用 `tools\setup-napcat.ps1` 一次装好即可，之后每次只需双击桌面快捷方式「启动 NapCat（管理员）」扫码（或用 `napcat.quick.bat` 快速登录）。脚本会自动处理今天常见的坑：NapCat 包被截断（体积<30MB 会重下）、bat 换行符/编码错误、注入器版本不匹配、QQ 报「文件已损坏」、WebUI 端口与 Token 配置。
 
 **Q：QQ 显示已连接，但收不到消息？** A：①确认 NapCat 的 WebSocket 服务器确实在监听（NapCat 日志里能看到连接）；②确认 QQ 账号在 NapCat 里处于登录状态、并且确实有新消息；③如果 NapCat 配置了 Token，WeNotice 里必须填一样的；④点侧栏 QQ 卡片上的「测试连接」看具体错误；⑤QQ 私聊/群消息都需要 OneBot 端推送 `message` 事件（NapCat 默认会推）。
 
@@ -269,6 +294,7 @@ WeNotice/
 │  ├─ download-electron.mjs  下载 Electron 预编译包（npmmirror）
 │  ├─ mock-weflow.mjs        WeFlow/AstrWeChat API 模拟服务（无微信时联调）
 │  ├─ mock-onebot.mjs        OneBot 11 WebSocket 模拟服务端（无 QQ 时联调）
+│  ├─ setup-napcat.ps1      QQ 数据源一键安装/修复（便携 QQ + NapCat + 注入器 + 启动脚本）
 │  ├─ launcher.cs           WeNotice.exe 启动器源码（C#，csc 编译）
 │  ├─ build-portable.ps1    便携版打包脚本
 │  ├─ gen-icons.py          应用图标生成（Pillow）
