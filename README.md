@@ -68,7 +68,7 @@
 - 消息先经过**规则引擎**：`系统事件 → 自己发送 → 静音会话 → 用户规则（按优先级）→ 重点会话 → 内置词库识别`
 - 判定结果三档：`notify`（弹桌面通知 + 进通知中心）、`list`（只进通知中心）、`ignore`（只在「全部消息」）
 - 内置识别覆盖 12 类：公告通知、@我/全员、安全验证、交易财务、物流快递、日程安排、工作事务、文件、链接、系统消息、普通聊天、自定义
-- **可选：QQ 消息源（WeNotice v1.3.3+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
+- **可选：QQ 消息源（WeNotice v1.3.4+）**——WeNotice 作为 OneBot 11 WebSocket **客户端**，连接本机 QQ 协议端（推荐 [NapCatQQ](https://github.com/NapNeko/NapCatQQ)）只读接收 QQ 群/私聊消息，与微信消息共用同一套分类、规则、通知、托盘；WeNotice 不实现 QQ 登录协议、不向 QQ 发送任何消息。
 
 ---
 

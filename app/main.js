@@ -789,6 +789,9 @@ async function startSource() {
 
 let sourceStarting = false;
 
+// Token 失效自动修复（AstrWeChat 重启后 Token 可能变化，WeNotice 需要自动跟上）
+let tokenRepair = { inFlight: false, lastAt: 0, attempts: 0 };
+
 /**
  * 完整启动流程（打开应用 / 保存设置 / 手动重连时调用）：
  *  1) 检查是否配置了 API 地址与 Token；
@@ -870,6 +873,27 @@ async function ensureSourceReady() {
         }
       }
     }
+    const tokenProbe = await AstrWechat.probeSessions(base, cfg.token, 3000);
+    if (!tokenProbe.ok) {
+      bootLog(`ensure: token invalid (${tokenProbe.reason}${tokenProbe.status ? ` ${tokenProbe.status}` : ''})`);
+      if (cfg.autoLaunchAstrWechat !== false) {
+        source.setStatus('launching', 'Access Token 失效，正在自动修复 AstrWeChat 配置…');
+        sendEvent({ type: 'toast', message: 'Access Token 失效，正在自动修复：重启 AstrWeChat 并写入新的本地 Token…' });
+        const repaired = await enableAstrApi();
+        bootLog(`ensure: token repair ok=${repaired.ok} error=${repaired.error || ''} needElevation=${Boolean(repaired.needElevation)}`);
+        if (repaired.ok) {
+          sendEvent({ type: 'toast', message: '已自动修复 AstrWeChat Token，正在连接…' });
+          bootLog('ensure: start source (after repair)');
+          return startSource();
+        }
+        sendEvent({ type: 'toast', message: `Token 自动修复失败：${repaired.hint || repaired.error || '未知错误'}` });
+        source.setStatus('error', repaired.hint || repaired.error || 'Token 自动修复失败');
+        return { ok: false, error: repaired.error || 'token-repair-failed' };
+      }
+      source.setStatus('error', 'Access Token 无效；请在设置里点「一键开启 AstrWeChat API」生成新的 Token');
+      return { ok: false, error: 'invalid-token' };
+    }
+
     bootLog('ensure: start source');
     return startSource();
   } finally {
@@ -915,6 +939,36 @@ function onSourceStatus(status) {
     maybeBackfillRecent();
   } else if (status.state === 'error' || status.state === 'no-config') {
     backfilled = false;
+  }
+
+  if (status.state === 'error' && /Access Token|token 无效|未经授权|401/i.test(String(status.message || '')) && !tokenRepair.inFlight) {
+    maybeRepairToken(status.message || '');
+  }
+}
+
+async function maybeRepairToken(message) {
+  const cfg = config().source || {};
+  if (cfg.autoLaunchAstrWechat === false) return;
+  if (tokenRepair.inFlight) return;
+  const now = Date.now();
+  if (now - tokenRepair.lastAt < 5 * 60 * 1000 && tokenRepair.attempts >= 3) return;
+  tokenRepair = { inFlight: true, lastAt: now, attempts: tokenRepair.attempts + 1 };
+  bootLog(`token repair: triggered (${message})`);
+  sendEvent({ type: 'toast', message: 'Access Token 失效，正在自动修复：重启 AstrWeChat 并写入新的本地 Token…' });
+  try {
+    const repaired = await enableAstrApi();
+    bootLog(`token repair: ok=${repaired.ok} error=${repaired.error || ''} needElevation=${Boolean(repaired.needElevation)}`);
+    if (repaired.ok) {
+      sendEvent({ type: 'toast', message: '已自动修复 AstrWeChat Token，正在重新连接…' });
+      await source.connect();
+    } else {
+      sendEvent({ type: 'toast', message: `Token 自动修复失败：${repaired.hint || repaired.error || '未知错误'}` });
+    }
+  } catch (err) {
+    bootLog(`token repair: exception ${err.message}`);
+    sendEvent({ type: 'toast', message: `Token 自动修复异常：${err.message}` });
+  } finally {
+    tokenRepair = { inFlight: false, lastAt: Date.now(), attempts: tokenRepair.attempts };
   }
 }
 

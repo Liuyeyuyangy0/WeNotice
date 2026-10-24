@@ -1,5 +1,11 @@
 # 更新日志
 
+## v1.3.4 (2026-10-25)
+
+- 自动修复失效 Token：启动时/运行中发现 `Access Token 无效` 时，若 AstrWeChat 未以管理员权限运行，会自动停止 AstrWeChat、写入新的本地 Token、重新启动并重连（带 toast 提示）。
+- 若 AstrWeChat 以管理员权限运行导致无法自动停止：会提示「请手动退出 AstrWeChat 后再点一次一键开启」或「以管理员身份重启 WeNotice」，不再只显示笼统的连接错误。
+- 启动时先校验 Token（`/api/v1/sessions` 探测），无效则走自动修复，而不是直接进入报错状态。
+
 ## v1.3.3 (2026-10-25)
 
 - 自动初始化 AstrWeChat API 的过程增加可见提示：窗口内 toast 会显示「正在初始化 AstrWeChat 本地 API…」「已自动开启 AstrWeChat 本地 API 并写入新 Token，正在连接…」或失败原因，不再只有一闪而过的状态文字。
