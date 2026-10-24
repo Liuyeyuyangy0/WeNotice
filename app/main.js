@@ -804,6 +804,7 @@ async function ensureSourceReady() {
   }
   if (sourceStarting) return { ok: false, error: '正在启动中' };
   sourceStarting = true;
+  let autoInitialized = false;
   try {
     // 没有任何 Token 且允许自动启动时，直接走「一键开启」流程（生成 Token + 拉起 AstrWeChat）
     if (!cfg.token) {
@@ -813,13 +814,20 @@ async function ensureSourceReady() {
       }
       bootLog('ensure: no token, running enable-astr-api');
       source.setStatus('launching', '正在初始化 AstrWeChat 本地 API…');
+      sendEvent({ type: 'toast', message: '正在初始化 AstrWeChat 本地 API（会自动生成新 Token 并启动 AstrWeChat）…' });
       const enabled = await enableAstrApi();
       bootLog(`ensure: enable-astr-api ok=${enabled.ok} error=${enabled.error || ''} needElevation=${Boolean(enabled.needElevation)}`);
       if (!enabled.ok) {
+        sendEvent({ type: 'toast', message: `AstrWeChat API 初始化失败：${enabled.hint || enabled.error || '未知错误'}` });
         source.setStatus('error', enabled.hint || enabled.error || '初始化 AstrWeChat API 失败');
         return { ok: false, error: enabled.error || 'enable-failed' };
       }
       cfg = config().source || {};
+      autoInitialized = true;
+    }
+
+    if (autoInitialized) {
+      sendEvent({ type: 'toast', message: '已自动开启 AstrWeChat 本地 API 并写入新 Token，正在连接…' });
     }
 
     const base = AstrWechat.normalizeBaseUrl(cfg.baseUrl);
@@ -836,12 +844,15 @@ async function ensureSourceReady() {
       if (!running) {
         // AstrWeChat 没在运行：完整初始化（写入新的本地 Token + 启动 AstrWeChat + 等 API 就绪）
         source.setStatus('launching', 'AstrWeChat 未运行，正在自动启动并配置本地 API…');
+        sendEvent({ type: 'toast', message: 'AstrWeChat 未运行：正在自动生成新 Token 并启动 AstrWeChat…' });
         const enabled = await enableAstrApi();
         bootLog(`ensure: enable-astr-api ok=${enabled.ok} error=${enabled.error || ''} needElevation=${Boolean(enabled.needElevation)}`);
         if (!enabled.ok) {
+          sendEvent({ type: 'toast', message: `AstrWeChat 启动失败：${enabled.hint || enabled.error || '未知错误'}` });
           source.setStatus('error', enabled.hint || enabled.error || '启动 AstrWeChat 失败');
           return { ok: false, error: enabled.error || 'launch-failed' };
         }
+        autoInitialized = true;
       } else {
         source.setStatus('launching', 'AstrWeChat 已在运行，正在等待本地 API 就绪…');
         const waited = await AstrWechat.waitForHealth(base, {

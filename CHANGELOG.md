@@ -1,5 +1,10 @@
 # 更新日志
 
+## v1.3.3 (2026-10-25)
+
+- 自动初始化 AstrWeChat API 的过程增加可见提示：窗口内 toast 会显示「正在初始化 AstrWeChat 本地 API…」「已自动开启 AstrWeChat 本地 API 并写入新 Token，正在连接…」或失败原因，不再只有一闪而过的状态文字。
+- 启动自动生成的 Token 会写回 WeNotice 配置（version/token 变化在诊断信息里可查）。
+
 ## v1.3.2 (2026-10-25)
 
 - 启动时若 AstrWeChat 未运行：自动**生成新的本地 Token 并写入配置**，再拉起 AstrWeChat、等本地 API 就绪后连接（不再只是"尝试打开"）。
